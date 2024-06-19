@@ -1,0 +1,17 @@
+[package]
+name = "yllama"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.37.0", features = ["full"] }
+anyhow = "1.0.86"
+clap = { version = "4.5.4", features = ["derive"] }
+rand = "0.8.5"
+tokenizers = "0.19.1"
+
+[dependencies.yloader]
+path = "../yloader"
+
+[dependencies.ymath]
+path = "../ymath"

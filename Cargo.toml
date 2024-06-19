@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "yloader",
+  "yllama",
+  "ymath",
+]
+resolver = "2"

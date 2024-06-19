@@ -1,0 +1,7 @@
+[package]
+name = "ymath"
+edition = "2021"
+
+[dependencies]
+half = "2.4.1"
+rand = "0.8.5"
