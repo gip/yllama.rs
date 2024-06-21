@@ -73,7 +73,9 @@ impl<'a> LlamaBlock<'a, f32> {
         model: &'a ModelDescription,
         i: usize,
         params: LlamaParams,
+        clone: bool
     ) -> Result<LlamaBlock<'a, f32>, anyhow::Error> {
+
         macro_rules! build_tensor {
             ($s:expr) => {{
                 let name = format!($s, i);
@@ -82,7 +84,7 @@ impl<'a> LlamaBlock<'a, f32> {
                     .tensors
                     .get(&name)
                     .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor2())?
+                    .map(|x| x.to_tensor2(clone))?
             }};
         }
 
@@ -94,7 +96,7 @@ impl<'a> LlamaBlock<'a, f32> {
                     .tensors
                     .get(&name)
                     .ok_or_else(|| anyhow!("vector {} not found", name))
-                    .map(|x| x.to_vector())?
+                    .map(|x| x.to_vector(clone))?
             }};
         }
 
@@ -262,7 +264,7 @@ fn conv_err(b: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::
 }
 
 impl<'a> Llama<'a> {
-    fn new(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Llama<'a>, anyhow::Error> {
+    fn new(model: &'a ModelDescription, tokenizer_path: &str, clone: bool) -> Result<Llama<'a>, anyhow::Error> {
         let header = &model.model.header;
 
         // Huggingface tokenizer
@@ -301,7 +303,7 @@ impl<'a> Llama<'a> {
                     .tensors
                     .get(name)
                     .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor2())?
+                    .map(|x| x.to_tensor2(clone))?
             }};
         }
 
@@ -313,7 +315,7 @@ impl<'a> Llama<'a> {
                     .tensors
                     .get(name)
                     .ok_or_else(|| anyhow!("vector {} not found", name))
-                    .map(|x| x.to_vector())?
+                    .map(|x| x.to_vector(clone))?
             }};
         }
 
@@ -323,7 +325,7 @@ impl<'a> Llama<'a> {
 
         let blocks: Result<Vec<LlamaBlock>, anyhow::Error> = (0..params.block_count)
             .into_iter()
-            .map(|i| LlamaBlock::new(&model, i, params))
+            .map(|i| LlamaBlock::new(&model, i, params, clone))
             .collect();
 
         let blocks = blocks?;
@@ -341,8 +343,8 @@ impl<'a> Llama<'a> {
 }
 
 impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
-    fn build<'b>(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
-        Ok(Llama::new(&model, tokenizer_path)?)
+    fn build(model: &'a ModelDescription, tokenizer_path: &str, clone: bool) -> Result<Self, anyhow::Error> {
+        Ok(Llama::new(&model, tokenizer_path, clone)?)
     }
 
     fn embedding_length(&self) -> usize {

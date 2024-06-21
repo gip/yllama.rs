@@ -42,12 +42,26 @@ pub trait D<const DIM: usize> {
 #[derive(Debug)]
 pub struct Tensor<'a, T, const DIM: usize> {
     pub shape: [usize; DIM],
+    pub vec: Option<Vec<T>>,
     pub slice: &'a [T],
 }
 
 impl<'a, T, const DIM: usize> D<DIM> for Tensor<'a, T, DIM> {
     fn shape(&self) -> [usize; DIM] {
         self.shape
+    }
+}
+
+impl<'a, T, const DIM: usize> Clone for  Tensor<'a, T, DIM> 
+where T : Clone {
+    fn clone(&self) -> Self {
+        let mut vec = Vec::from(self.slice);
+        let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
+         Tensor {
+            shape: self.shape,
+            vec: Some(vec),
+            slice,
+         }
     }
 }
 
@@ -156,11 +170,11 @@ where
 
 pub type Tensor2<'a, T> = Tensor<'a, T, 2>;
 pub trait Tensorify2<'a, T> {
-    fn to_tensor2(&self) -> Tensor2<T>;
+    fn to_tensor2(&self, clone: bool) -> Tensor2<T>;
 }
 
 pub trait Vectorify<'a, T> {
-    fn to_vector(&self) -> Vector<T>;
+    fn to_vector(&self, clone: bool) -> Vector<T>;
 }
 
 pub trait VectorifyMut<'a, T> {
@@ -377,6 +391,7 @@ impl<'a, T: Copy> Tensor2<'a, T> {
         debug_assert!(i < d1);
         Vector {
             shape: [d0],
+            vec: None,
             slice: &self.slice[i * d0..(i + 1) * d0],
         }
     }

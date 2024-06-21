@@ -51,6 +51,7 @@ unsafe fn process(
     path: &str,
     tokenizer_path: &str,
     prompt: &str,
+    clone: bool
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (arch, name, gguf) = load_fast(path)?;
     let model = load_build(path, gguf)?;
@@ -60,11 +61,12 @@ unsafe fn process(
 
     match arch.as_str() {
         "llama" => {
-            let l: Llama = LLM::build(&model, tokenizer_path)?;
+            let l: Llama = LLM::build(&model, tokenizer_path, clone)?;
+            // std::mem::drop(model);
             run(l, prompt)
         }
         "gpt" => {
-            let g: Gpt = LLM::build(&model, tokenizer_path)?;
+            let g: Gpt = LLM::build(&model, tokenizer_path, clone)?;
             run(g, prompt)
         }
         _ => anyhow::Result::Err(anyhow!("Unsupported architecture"))?,
@@ -83,6 +85,9 @@ struct Args {
 
     #[arg(short, long)]
     prompt: String,
+
+    #[arg(short, long, default_value_t = false)]
+    clone: bool,
 
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
@@ -104,7 +109,7 @@ fn main() {
 
     let _r: f32 = rng.gen_range(0.0..1.0);
 
-    let result = unsafe { process(&args.file, &args.tokenizer, &args.prompt) };
+    let result = unsafe { process(&args.file, &args.tokenizer, &args.prompt, args.clone) };
 
     match result {
         Err(e) => {

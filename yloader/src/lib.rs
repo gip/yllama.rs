@@ -22,22 +22,40 @@ pub struct ModelFile<T> {
     pub model: T,
 }
 
-impl<'a, T> Tensorify2<'a, T> for GGUFTensor<MemLayout<'a, T>> {
-    fn to_tensor2(&self) -> Tensor2<T> {
+impl<'a, T> Tensorify2<'a, T> for GGUFTensor<MemLayout<'a, T>> 
+where T: Clone {
+    fn to_tensor2(&self, clone: bool) -> Tensor2<T> {
         assert!(self.dimensions.len() == 2);
+        let (vec, slice) = if clone {
+            let mut vec = Vec::from(self.ext.to_slice());
+            let slice: &'a [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
+            (Some(vec), slice)
+        } else {
+            (None, self.ext.to_slice())
+        };
         Tensor2 {
             shape: [self.dimensions[0] as usize, self.dimensions[1] as usize],
-            slice: self.ext.to_slice(),
+            vec,
+            slice,
         }
     }
 }
 
-impl<'a, T> Vectorify<'a, T> for GGUFTensor<MemLayout<'a, T>> {
-    fn to_vector(&self) -> Vector<T> {
+impl<'a, T> Vectorify<'a, T> for GGUFTensor<MemLayout<'a, T>> 
+where T : Clone {
+    fn to_vector(&self, clone: bool) -> Vector<T> {
         assert!(self.dimensions.len() == 1);
+        let (vec, slice) = if clone {
+            let mut vec = Vec::from(self.ext.to_slice());
+            let slice: &'a [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
+            (Some(vec), slice)
+        } else {
+            (None, self.ext.to_slice())
+        };
         Vector {
             shape: [self.dimensions[0] as usize],
-            slice: self.ext.to_slice(),
+            vec,
+            slice,
         }
     }
 }
