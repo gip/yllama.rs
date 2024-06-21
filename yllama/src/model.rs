@@ -1,7 +1,7 @@
 use ymath::*;
 
 pub trait LLM<'a, T, TK, M>: Sized {
-    fn build(model: &'a M, tokenizer_path: &str, clone: bool) -> Result<Self, anyhow::Error>
+    fn build(model: &'a M, tokenizer_path: &str) -> Result<Self, anyhow::Error>
     where
         Self: Sized;
 

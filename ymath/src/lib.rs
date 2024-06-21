@@ -52,29 +52,50 @@ impl<'a, T, const DIM: usize> D<DIM> for Tensor<'a, T, DIM> {
     }
 }
 
-impl<'a, T, const DIM: usize> Clone for  Tensor<'a, T, DIM> 
-where T : Clone {
+impl<'a, T, const DIM: usize> Clone for Tensor<'a, T, DIM>
+where
+    T: Clone,
+{
     fn clone(&self) -> Self {
         let mut vec = Vec::from(self.slice);
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
-         Tensor {
+        Tensor {
             shape: self.shape,
             vec: Some(vec),
             slice,
-         }
+        }
     }
 }
 
+// TensorMut
 #[derive(Debug)]
 pub struct TensorMut<'a, T, const DIM: usize> {
     pub shape: [usize; DIM],
-    _vec: Option<Vec<T>>,
+    vec: Option<Vec<T>>,
     pub slice: &'a mut [T],
 }
 
 impl<'a, T, const DIM: usize> D<DIM> for TensorMut<'a, T, DIM> {
     fn shape(&self) -> [usize; DIM] {
         self.shape
+    }
+}
+
+impl<'a, T, const DIM: usize> Clone for TensorMut<'a, T, DIM>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        let mut vec = match &self.vec {
+            None => unimplemented!(),
+            Some(v) => v.clone(),
+        };
+        let slice = unsafe { std::mem::transmute(vec.as_mut_slice()) };
+        TensorMut {
+            shape: self.shape.clone(),
+            vec: Some(vec),
+            slice,
+        }
     }
 }
 
@@ -93,7 +114,7 @@ where
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         TensorMut {
             shape,
-            _vec: Some(vec),
+            vec: Some(vec),
             slice,
         }
     }
@@ -112,7 +133,7 @@ where
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         VectorMut {
             shape: [i],
-            _vec: Some(vec),
+            vec: Some(vec),
             slice,
         }
     }
@@ -126,7 +147,7 @@ where
         }
         VectorMut {
             shape: [size],
-            _vec: Some(vec),
+            vec: Some(vec),
             slice,
         }
     }
@@ -144,7 +165,7 @@ where
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         Tensor2Mut {
             shape: [i, j],
-            _vec: Some(vec),
+            vec: Some(vec),
             slice,
         }
     }
@@ -162,7 +183,7 @@ where
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         Tensor3Mut {
             shape: [i, j, k],
-            _vec: Some(vec),
+            vec: Some(vec),
             slice,
         }
     }
@@ -170,11 +191,11 @@ where
 
 pub type Tensor2<'a, T> = Tensor<'a, T, 2>;
 pub trait Tensorify2<'a, T> {
-    fn to_tensor2(&self, clone: bool) -> Tensor2<T>;
+    fn to_tensor2(&self) -> Tensor2<T>;
 }
 
 pub trait Vectorify<'a, T> {
-    fn to_vector(&self, clone: bool) -> Vector<T>;
+    fn to_vector(&self) -> Vector<T>;
 }
 
 pub trait VectorifyMut<'a, T> {
@@ -403,7 +424,7 @@ impl<'a, T: Copy> Tensor2Mut<'a, T> {
         debug_assert!(i < d1);
         VectorMut {
             shape: [d1],
-            _vec: None,
+            vec: None,
             slice: &mut self.slice[i * d1..(i + 1) * d1],
         }
     }

@@ -1,8 +1,8 @@
 use crate::model::LLM;
 use anyhow::anyhow;
+use tokenizers::tokenizer::Tokenizer;
 use yloader::*;
 use ymath::*;
-use tokenizers::tokenizer::Tokenizer;
 
 type ModelDescription<'a> = ModelFile<GGUFFile<MemLayout<'a, f32>>>;
 
@@ -18,11 +18,11 @@ struct LlamaParams<T = usize, U = f32> {
     rope_freq_base: U,
     _rope_dimension_count: T,
     vocab_size: T,
-    max_seq_len: T,                      // This could be context_length or lower to save space
+    max_seq_len: T, // This could be context_length or lower to save space
     attention_kv_length: T,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 struct LlamaBlock<'a, T = f32> {
     i: usize,
@@ -50,7 +50,7 @@ struct LlamaBlock<'a, T = f32> {
     attn_score: Tensor2Mut<'a, T>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Llama<'a, T = f32> {
     params: LlamaParams,
@@ -73,9 +73,7 @@ impl<'a> LlamaBlock<'a, f32> {
         model: &'a ModelDescription,
         i: usize,
         params: LlamaParams,
-        clone: bool
     ) -> Result<LlamaBlock<'a, f32>, anyhow::Error> {
-
         macro_rules! build_tensor {
             ($s:expr) => {{
                 let name = format!($s, i);
@@ -84,7 +82,7 @@ impl<'a> LlamaBlock<'a, f32> {
                     .tensors
                     .get(&name)
                     .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor2(clone))?
+                    .map(|x| x.to_tensor2())?
             }};
         }
 
@@ -96,7 +94,7 @@ impl<'a> LlamaBlock<'a, f32> {
                     .tensors
                     .get(&name)
                     .ok_or_else(|| anyhow!("vector {} not found", name))
-                    .map(|x| x.to_vector(clone))?
+                    .map(|x| x.to_vector())?
             }};
         }
 
@@ -263,8 +261,28 @@ fn conv_err(b: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::
     b
 }
 
+// type Bar<'a> = Tensor2<'a, f32>;
+
+// pub struct Foo<'a> {
+//     a: Bar<'a>
+// }
+
+// impl<'a> Foo<'a> {
+//     fn new(t: &Bar<'a>) -> Self {
+//         Foo {
+//             a: t.clone()
+//         }
+//     }
+// }
+
+// fn test<'a>(s: Bar<'a>) {
+//     let foo = Foo::new(&s);
+//     std::mem::drop(s);
+//     foo.a;
+// }
+
 impl<'a> Llama<'a> {
-    fn new(model: &'a ModelDescription, tokenizer_path: &str, clone: bool) -> Result<Llama<'a>, anyhow::Error> {
+    fn new(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
         let header = &model.model.header;
 
         // Huggingface tokenizer
@@ -303,7 +321,7 @@ impl<'a> Llama<'a> {
                     .tensors
                     .get(name)
                     .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor2(clone))?
+                    .map(|x| x.to_tensor2())?
             }};
         }
 
@@ -315,7 +333,7 @@ impl<'a> Llama<'a> {
                     .tensors
                     .get(name)
                     .ok_or_else(|| anyhow!("vector {} not found", name))
-                    .map(|x| x.to_vector(clone))?
+                    .map(|x| x.to_vector())?
             }};
         }
 
@@ -325,7 +343,7 @@ impl<'a> Llama<'a> {
 
         let blocks: Result<Vec<LlamaBlock>, anyhow::Error> = (0..params.block_count)
             .into_iter()
-            .map(|i| LlamaBlock::new(&model, i, params, clone))
+            .map(|i| LlamaBlock::new(&model, i, params))
             .collect();
 
         let blocks = blocks?;
@@ -343,8 +361,8 @@ impl<'a> Llama<'a> {
 }
 
 impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
-    fn build(model: &'a ModelDescription, tokenizer_path: &str, clone: bool) -> Result<Self, anyhow::Error> {
-        Ok(Llama::new(&model, tokenizer_path, clone)?)
+    fn build(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
+        Ok(Llama::new(&model, tokenizer_path)?)
     }
 
     fn embedding_length(&self) -> usize {

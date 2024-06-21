@@ -51,23 +51,31 @@ unsafe fn process(
     path: &str,
     tokenizer_path: &str,
     prompt: &str,
-    clone: bool
+    clone: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (arch, name, gguf) = load_fast(path)?;
-    let model = load_build(path, gguf)?;
 
     println!("Architecture == {}", arch);
     println!("Name == '{}'", name);
 
     match arch.as_str() {
         "llama" => {
-            let l: Llama = LLM::build(&model, tokenizer_path, clone)?;
-            // std::mem::drop(model);
-            run(l, prompt)
+            let model = load_build(path, gguf)?;
+            let runnable_0: Llama = LLM::build(&model, tokenizer_path)?;
+            let runnable_c = if clone {
+                let r = runnable_0.clone();
+                // std::mem::drop(model); TODO: find a way to drop model to save memory
+                std::mem::drop(runnable_0);
+                r
+            } else {
+                runnable_0
+            };
+            run(runnable_c, prompt)
         }
         "gpt" => {
-            let g: Gpt = LLM::build(&model, tokenizer_path, clone)?;
-            run(g, prompt)
+            let model = load_build(path, gguf)?;
+            let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
+            run(runnable, prompt)
         }
         _ => anyhow::Result::Err(anyhow!("Unsupported architecture"))?,
     }?;
@@ -92,7 +100,7 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
-    #[arg(short, long, default_value_t = 0.7)]
+    #[arg(long, default_value_t = 0.7)]
     temp: f32,
 
     #[arg(short, long)]

@@ -11,7 +11,6 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
     fn build<'b>(
         _model: &'a ModelDescription,
         _tokenizer_path: &str,
-        _clone: bool
     ) -> Result<Self, anyhow::Error> {
         unimplemented!()
     }
