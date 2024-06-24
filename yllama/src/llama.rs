@@ -22,7 +22,7 @@ struct LlamaParams<T = usize, U = f32> {
     attention_kv_length: T,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[allow(dead_code)]
 struct LlamaBlock<'a, T = f32> {
     i: usize,
@@ -50,7 +50,7 @@ struct LlamaBlock<'a, T = f32> {
     attn_score: Tensor2Mut<'a, T>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct Llama<'a, T = f32> {
     params: LlamaParams,
@@ -154,7 +154,7 @@ impl<'a> LlamaBlock<'a, f32> {
         trans!(rmsnorm(
             xb,
             x,
-            &self.attn_norm,
+            &mut self.attn_norm,
             self.params.attention_layer_norm_rms_epsilon
         ));
 
@@ -162,9 +162,9 @@ impl<'a> LlamaBlock<'a, f32> {
         let q = &mut self.q;
         let k = &mut self.k_cache.row(pos);
         let v = &mut self.v_cache.row(pos);
-        matmul(q, &self.attn_q, xb);
-        matmul(k, &self.attn_k, xb);
-        matmul(v, &self.attn_v, xb);
+        matmul::<f32, _, _, _>(q, &mut self.attn_q, xb);
+        matmul::<f32, _, _, _>(k, &mut self.attn_k, xb);
+        matmul::<f32, _, _, _>(v, &mut self.attn_v, xb);
 
         // RoPE
         let attn_head_size = self.params.embedding_length / self.params.attention_head_count;
@@ -226,7 +226,7 @@ impl<'a> LlamaBlock<'a, f32> {
         }
 
         // Output of attention
-        matmul(xb2, &self.attn_ouput, xb);
+        matmul::<f32, _, _, _>(xb2, &mut self.attn_ouput, xb);
 
         // Residual
         acc(x, xb2);
@@ -235,13 +235,13 @@ impl<'a> LlamaBlock<'a, f32> {
         trans!(rmsnorm(
             xb,
             x,
-            &self.ffn_norm,
+            &mut self.ffn_norm,
             self.params.attention_layer_norm_rms_epsilon
         ));
 
         // Non-linearity
-        matmul(hb, &self.ffn_gate, xb);
-        matmul(hb2, &self.ffn_up, xb);
+        matmul::<f32, _, _, _>(hb, &mut self.ffn_gate, xb);
+        matmul::<f32, _, _, _>(hb2, &mut self.ffn_up, xb);
         for i in 0..self.params.feed_forward_length {
             let mut val = hb[i];
             val *= 1.0 / (1.0 + f32::exp(-val));
@@ -250,7 +250,7 @@ impl<'a> LlamaBlock<'a, f32> {
         }
 
         // Ffn output
-        matmul(xb, &self.ffn_down, hb);
+        matmul::<f32, _, _, _>(xb, &mut self.ffn_down, hb);
 
         // Residual
         acc(x, xb);
@@ -261,28 +261,8 @@ fn conv_err(b: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::
     b
 }
 
-// type Bar<'a> = Tensor2<'a, f32>;
-
-// pub struct Foo<'a> {
-//     a: Bar<'a>
-// }
-
-// impl<'a> Foo<'a> {
-//     fn new(t: &Bar<'a>) -> Self {
-//         Foo {
-//             a: t.clone()
-//         }
-//     }
-// }
-
-// fn test<'a>(s: Bar<'a>) {
-//     let foo = Foo::new(&s);
-//     std::mem::drop(s);
-//     foo.a;
-// }
-
 impl<'a> Llama<'a> {
-    fn new(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
+    fn new(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Llama<'a>, anyhow::Error> {
         let header = &model.model.header;
 
         // Huggingface tokenizer
@@ -361,7 +341,7 @@ impl<'a> Llama<'a> {
 }
 
 impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
-    fn build(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
+    fn build<'b>(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
         Ok(Llama::new(&model, tokenizer_path)?)
     }
 
@@ -381,7 +361,7 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
     }
 
     fn embed(&self, x: &mut VectorMut<f32>, token: u32, _pos: usize) {
-        cp(x, &self.token_embd.row(token as usize))
+        cp(x, &mut self.token_embd.row(token as usize))
     }
 
     fn decode(&self, tokens: &Vec<u32>) -> String {
@@ -398,16 +378,16 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
         self.blocks[block].forward(x, pos)
     }
 
-    unsafe fn logits(&self, logits: &mut VectorMut<f32>, x: &VectorMut<f32>) {
+    unsafe fn logits(&mut self, logits: &mut VectorMut<f32>, x: &mut VectorMut<f32>) {
         // Final rmsnorm
         let mut x2 = VectorMut::new(self.params.embedding_length);
         rmsnorm(
             &mut x2,
             x,
-            &self.output_norm,
+            &mut self.output_norm,
             self.params.attention_layer_norm_rms_epsilon,
         );
         // Last act: logits
-        matmul(logits, &self.output, &x2);
+        matmul::<f32, _, _, _>(logits, &mut self.output, &mut x2);
     }
 }

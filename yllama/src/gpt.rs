@@ -45,7 +45,7 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
         unimplemented!()
     }
 
-    unsafe fn logits(&self, _logits: &mut VectorMut<f32>, _x: &VectorMut<f32>) {
+    unsafe fn logits(&mut self, _logits: &mut VectorMut<f32>, _x: &mut VectorMut<f32>) {
         unimplemented!()
     }
 }

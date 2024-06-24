@@ -1,49 +1,58 @@
 use core::ops::Add;
 use core::ops::Mul;
 use half::f16;
+use memmap2::Mmap;
 use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::ops::Range;
 use std::ops::{Index, IndexMut};
-
-// Memory layout
-#[derive(Clone)]
-pub enum MemLayout<'a, T> {
-    MmapLayout { slice: &'a [T] },
-    VecLayout { vec: Vec<T> },
-}
-
-impl<'a, T> MemLayout<'a, T> {
-    pub fn to_slice(&self) -> &[T] {
-        match self {
-            MemLayout::MmapLayout { slice } => slice,
-            MemLayout::VecLayout { vec } => vec.as_slice(),
-        }
-    }
-}
-
-impl<'a, T> Debug for MemLayout<'a, T> {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let s = match self {
-            MemLayout::MmapLayout { .. } => "<MmapLayout>",
-            MemLayout::VecLayout { .. } => "<VecLayout>",
-        };
-        let _ = formatter.pad(s);
-        Ok(())
-    }
-}
+use std::rc::Rc;
 
 // Tensor
 pub trait D<const DIM: usize> {
     fn shape(&self) -> [usize; DIM];
 }
 
+// Tensor
 #[derive(Debug)]
-pub struct Tensor<'a, T, const DIM: usize> {
+pub struct Tensor<'a, T, const DIM: usize, E = ()> {
     pub shape: [usize; DIM],
-    pub vec: Option<Vec<T>>,
+    pub vec: Option<Vec<T>>, // Used after copy
     pub slice: &'a [T],
+    pub ext: E,
+}
+
+pub trait TRead<T, const DIM: usize> {
+    fn reading(&self) -> ([usize; DIM], &[T]);
+    // fn get(&mut self, idx: [usize; DIM]) -> &T {
+    //     let (shape, slice) = self.reading();
+    //     let mut index = 0;
+    //     debug_assert!(idx[DIM-1] < shape[DIM-1]);
+    //     for i in 0..DIM-1 {
+    //         index += idx[i] * shape[i]
+    //     };
+    //     &slice[index + idx[DIM-1]]
+    // }
+}
+
+pub trait TWrite<T: Copy, const DIM: usize> {
+    fn writing(&mut self) -> ([usize; DIM], &mut [T]);
+    // fn set(&'a mut self, idx: [usize; DIM], val: T) {
+    //     let (shape, slice) = self.writing();
+    //     let mut index = 0;
+    //     debug_assert!(idx[DIM-1] < shape[DIM-1]);
+    //     for i in 0..DIM-1 {
+    //         index += idx[i] * shape[i]
+    //     };
+    //     slice[index + idx[DIM-1]] = val
+    // }
+}
+
+impl<T, const DIM: usize> TRead<T, DIM> for Tensor<'_, T, DIM, ()> {
+    fn reading(&self) -> ([usize; DIM], &[T]) {
+        (self.shape, self.slice)
+    }
 }
 
 impl<'a, T, const DIM: usize> D<DIM> for Tensor<'a, T, DIM> {
@@ -52,9 +61,10 @@ impl<'a, T, const DIM: usize> D<DIM> for Tensor<'a, T, DIM> {
     }
 }
 
-impl<'a, T, const DIM: usize> Clone for Tensor<'a, T, DIM>
+impl<'a, T, const DIM: usize, E> Clone for Tensor<'a, T, DIM, E>
 where
     T: Clone,
+    E: Clone,
 {
     fn clone(&self) -> Self {
         let mut vec = Vec::from(self.slice);
@@ -62,8 +72,25 @@ where
         Tensor {
             shape: self.shape,
             vec: Some(vec),
-            slice,
+            slice: slice,
+            ext: self.ext.clone(),
         }
+    }
+}
+
+impl<T: Clone, const DIM: usize> TRead<T, DIM> for Tensor<'_, T, DIM, Option<Rc<Mmap>>> {
+    fn reading(&self) -> ([usize; DIM], &[T]) {
+        // match self.ext {
+        //     None => (),
+        //     Some(_) => {
+        //         let vec = self.slice.to_vec();
+        //         self.slice = unsafe { std::mem::transmute(vec.as_slice()) };
+        //         self.vec = Some(vec);
+        //         self.ext = None;
+        //         println!("Rc<Mmap> dropped");
+        //     }
+        // };
+        (self.shape, self.slice)
     }
 }
 
@@ -73,6 +100,18 @@ pub struct TensorMut<'a, T, const DIM: usize> {
     pub shape: [usize; DIM],
     vec: Option<Vec<T>>,
     pub slice: &'a mut [T],
+}
+
+impl<T, const DIM: usize> TRead<T, DIM> for TensorMut<'_, T, DIM> {
+    fn reading(&self) -> ([usize; DIM], &[T]) {
+        (self.shape, self.slice)
+    }
+}
+
+impl<T: Copy, const DIM: usize> TWrite<T, DIM> for TensorMut<'_, T, DIM> {
+    fn writing(&mut self) -> ([usize; DIM], &mut [T]) {
+        (self.shape, self.slice)
+    }
 }
 
 impl<'a, T, const DIM: usize> D<DIM> for TensorMut<'a, T, DIM> {
@@ -86,14 +125,11 @@ where
     T: Clone,
 {
     fn clone(&self) -> Self {
-        let mut vec = match &self.vec {
-            None => unimplemented!(),
-            Some(v) => v.clone(),
-        };
+        let mut vec = self.vec.clone();
         let slice = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         TensorMut {
             shape: self.shape.clone(),
-            vec: Some(vec),
+            vec,
             slice,
         }
     }
@@ -138,12 +174,12 @@ where
         }
     }
 
-    pub fn new_from(y: Vector<'a, T>) -> Self {
-        let [size] = y.shape;
+    pub fn new_from(y: &'a mut Vector<'a, T>) -> Self {
+        let ([size], y_slice) = y.reading();
         let mut vec = vec![T::default(); size];
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         for i in 0..size {
-            vec[i] = y[i];
+            vec[i] = y_slice[i];
         }
         VectorMut {
             shape: [size],
@@ -342,48 +378,27 @@ pub fn dequantize_row_q6_k(x: &[BlockQ6K], y: &mut Vec<f32>, k: usize) -> usize 
     ycount
 }
 
-pub trait D1Get<T>: D<1> + Index<usize, Output = T> {}
-pub trait D1Set<T>: D<1> + IndexMut<usize, Output = T> {}
-
-pub trait D2Get<T>: D<2> + Index<(usize, usize), Output = T> {}
-
-pub trait D2Set<T>: D<2> + IndexMut<(usize, usize), Output = T> {}
-
 impl<'a, T> Index<usize> for Tensor<'a, T, 1> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
-        unsafe { &self.slice.get_unchecked(index) }
+        let (_, slice) = self.reading();
+        unsafe { slice.get_unchecked(index) }
     }
 }
 
 impl<'a, T> Index<usize> for TensorMut<'a, T, 1> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
-        unsafe { &self.slice.get_unchecked(index) }
+        let (_, slice) = self.reading();
+        unsafe { slice.get_unchecked(index) }
     }
 }
 
-impl<'a, T> IndexMut<usize> for TensorMut<'a, T, 1> {
+impl<'a, T: Copy> IndexMut<usize> for TensorMut<'a, T, 1> {
     // Output defined in Index trait, T
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        unsafe { self.slice.get_unchecked_mut(index) }
-    }
-}
-
-impl<'a, T> D2Set<T> for TensorMut<'a, T, 2> {}
-impl<'a, T> D2Get<T> for TensorMut<'a, T, 2> {}
-impl<'a, T> D2Get<T> for Tensor<'a, T, 2> {}
-
-impl<'a, T> D1Set<T> for VectorMut<'a, T> {}
-impl<'a, T> D1Get<T> for VectorMut<'a, T> {}
-impl<'a, T> D1Get<T> for Vector<'a, T> {}
-
-impl<'a, T> Index<(usize, usize)> for Tensor<'a, T, 2> {
-    type Output = T;
-    fn index(&self, (i, j): (usize, usize)) -> &Self::Output {
-        let [d0, d1] = self.shape;
-        debug_assert!(i < d1 && j < d0);
-        unsafe { &self.slice.get_unchecked(i * d0 + j) }
+        let (_, slice) = self.writing();
+        unsafe { slice.get_unchecked_mut(index) }
     }
 }
 
@@ -407,31 +422,32 @@ impl<'a, T> IndexMut<(usize, usize)> for TensorMut<'a, T, 2> {
 }
 
 impl<'a, T: Copy> Tensor2<'a, T> {
-    pub fn row(&self, i: usize) -> Vector<'a, T> {
-        let [d0, d1] = self.shape;
+    pub fn row(&'a self, i: usize) -> Vector<'a, T> {
+        let ([d0, d1], slice) = self.reading();
         debug_assert!(i < d1);
         Vector {
             shape: [d0],
             vec: None,
-            slice: &self.slice[i * d0..(i + 1) * d0],
+            slice: &slice[i * d0..(i + 1) * d0],
+            ext: (),
         }
     }
 }
 
 impl<'a, T: Copy> Tensor2Mut<'a, T> {
     pub fn row(&mut self, i: usize) -> VectorMut<T> {
-        let [_, d1] = self.shape;
+        let ([_, d1], slice) = self.writing();
         debug_assert!(i < d1);
         VectorMut {
             shape: [d1],
             vec: None,
-            slice: &mut self.slice[i * d1..(i + 1) * d1],
+            slice: &mut slice[i * d1..(i + 1) * d1],
         }
     }
 }
 
-pub fn softmax(v: &mut (impl D1Set<f32> + D1Get<f32>), size: usize) {
-    let [d0] = v.shape();
+pub fn softmax<'a>(v: &'a mut impl TWrite<f32, 1>, size: usize) {
+    let ([d0], v) = v.writing();
     debug_assert!(size < d0);
     let mut max = v[0];
     for i in 1..size {
@@ -450,74 +466,86 @@ pub fn softmax(v: &mut (impl D1Set<f32> + D1Get<f32>), size: usize) {
     }
 }
 
-pub unsafe fn matmul<'a, 'b, T>(
-    v1: &mut impl D1Set<T>,
-    m0: &'a impl D2Get<T>,
-    v0: &'b impl D1Get<T>,
+pub unsafe fn matmul<'a, 'b, W, T: Copy, S, V>(
+    v1: &'a mut impl TWrite<T, 1>,
+    m0: &'b mut impl TRead<S, 2>,
+    v0: &'b mut impl TRead<V, 1>,
 ) where
-    T: Mul<T, Output = T>,
-    T: 'a + 'b,
-    T: Add<T, Output = T> + Default + Copy,
+    W: Mul<W, Output = W>,
+    W: Add<W, Output = W> + Default + Copy,
+    V: Into<W> + Copy + 'b,
+    S: Into<W> + Copy + 'b,
+    W: Into<T> + 'b,
+    T: 'a,
 {
-    let [m0d0, m0d1] = m0.shape();
-    let [v0d0] = v0.shape();
-    let [v1d0] = v1.shape();
+    let ([m0d0, m0d1], m0_slice) = m0.reading();
+    let ([v0d0], v0_slice) = v0.reading();
+    let ([v1d0], v1_slice) = v1.writing();
     debug_assert!(m0d0 == v0d0);
     debug_assert!(m0d1 == v1d0);
     for i in 0..m0d1 {
-        let mut r: T = T::default();
+        let mut r: W = W::default();
         for j in 0..m0d0 {
-            r = r + m0[(i, j)] * v0[j];
+            r = r + m0_slice[i * m0d0 + j].into() * v0_slice[j].into();
         }
-        v1[i] = r;
+        v1_slice[i] = r.into();
     }
 }
 
-pub fn rmsnorm(
-    xout: &mut impl D1Set<f32>,
-    xin: &impl D1Get<f32>,
-    w: &impl D1Get<f32>,
+pub fn rmsnorm<'a, 'b>(
+    xout: &'a mut impl TWrite<f32, 1>,
+    xin: &'a mut impl TRead<f32, 1>,
+    w: &'a mut impl TRead<f32, 1>,
     epsilon: f32,
 ) {
-    let size = xin.shape()[0];
+    let ([xind], xins) = xin.reading();
+    let ([_], ws) = w.reading();
+    let ([_], xouts) = xout.writing();
+    let size = xind;
     let mut ss = 0.0;
     for i in 0..size {
-        ss = ss + xin[i] * xin[i];
+        ss = ss + xins[i] * xins[i];
     }
     ss /= size as f32;
     ss += epsilon;
     ss = 1.0 / ss.sqrt();
     for i in 0..size {
-        xout[i] = w[i] * (ss * xin[i]);
+        xouts[i] = ws[i] * (ss * xins[i]);
     }
 }
 
-pub fn acc(x: &mut (impl D1Set<f32> + D1Get<f32>), y: &impl D1Get<f32>) {
-    let [d0] = x.shape();
-    debug_assert!(d0 == y.shape()[0]);
-    for i in 0..d0 {
-        x[i] = x[i] + y[i];
+pub fn acc<'a, T>(x: &'a mut impl TWrite<T, 1>, y: &'a mut impl TRead<T, 1>)
+where
+    T: Copy + Add<T, Output = T> + 'a,
+{
+    let ([xd], xs) = x.writing();
+    let ([yd], ys) = y.reading();
+    debug_assert!(xd == yd);
+    for i in 0..xd {
+        xs[i] = xs[i] + ys[i];
     }
 }
 
-pub fn cp(x: &mut impl D1Set<f32>, y: &impl D1Get<f32>) {
-    let [d0] = x.shape();
-    debug_assert!(d0 == y.shape()[0]);
-    for i in 0..d0 {
-        x[i] = y[i];
+pub fn cp<'a, T: Copy + 'a>(x: &'a mut impl TWrite<T, 1>, y: &'a mut impl TRead<T, 1>) {
+    let ([yd], ys) = y.reading();
+    let ([xd], xs) = x.writing();
+    debug_assert!(xd == yd);
+    for i in 0..xd {
+        xs[i] = ys[i];
     }
 }
 
-pub fn max<T>(x: &impl D1Get<T>) -> (usize, T)
+pub fn max<'a, T: 'a>(x: &'a mut impl TRead<T, 1>) -> (usize, T)
 where
     T: PartialOrd + Copy,
 {
+    let ([size], slice) = x.reading();
     let mut i = 0;
-    let mut m = x[0];
-    for j in 1..x.shape()[0] {
-        if x[j] > m {
+    let mut m = slice[0];
+    for j in 1..size {
+        if slice[j] > m {
             i = j;
-            m = x[j];
+            m = slice[j];
         }
     }
     (i, m)

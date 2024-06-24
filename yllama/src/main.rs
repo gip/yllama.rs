@@ -35,8 +35,8 @@ where
         println!("{}", llm.decode(&chat));
         llm.embed(&mut x, next_token, pos);
         llm.forward(&mut x, pos);
-        llm.logits(&mut logits, &x);
-        let (tk, _) = max(&logits);
+        llm.logits(&mut logits, &mut x);
+        let (tk, _) = max(&mut logits);
         // println!("Predicted {} '{}'", tk, llm.decode(tk as u32));
         if pos + 1 < tokens.len() {
             next_token = tokens[pos + 1];
@@ -51,7 +51,7 @@ unsafe fn process(
     path: &str,
     tokenizer_path: &str,
     prompt: &str,
-    clone: bool,
+    _clone: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (arch, name, gguf) = load_fast(path)?;
 
@@ -61,16 +61,8 @@ unsafe fn process(
     match arch.as_str() {
         "llama" => {
             let model = load_build(path, gguf)?;
-            let runnable_0: Llama = LLM::build(&model, tokenizer_path)?;
-            let runnable_c = if clone {
-                let r = runnable_0.clone();
-                // std::mem::drop(model); TODO: find a way to drop model to save memory
-                std::mem::drop(runnable_0);
-                r
-            } else {
-                runnable_0
-            };
-            run(runnable_c, prompt)
+            let runnable: Llama = LLM::build(&model, tokenizer_path)?;
+            run(runnable, prompt)
         }
         "gpt" => {
             let model = load_build(path, gguf)?;
