@@ -9,6 +9,7 @@ anyhow = "1.0.86"
 clap = { version = "4.5.4", features = ["derive"] }
 rand = "0.8.5"
 tokenizers = "0.19.1"
+half = { version = "2.4.1", features = ["num-traits"] }
 
 [dependencies.yloader]
 path = "../yloader"

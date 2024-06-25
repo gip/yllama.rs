@@ -1,96 +1,224 @@
-use core::ops::Add;
-use core::ops::Mul;
+use core::ops::{Add, Div, Mul, Neg, Sub};
 use half::f16;
 use memmap2::Mmap;
 use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::ops::Range;
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 
-// Tensor
+// Float type
+pub trait Float<T>:
+    Copy
+    + Add<T, Output = T>
+    + Sub<T, Output = T>
+    + Mul<T, Output = T>
+    + Div<T, Output = T>
+    + Neg<Output = T>
+    + Into<f32>
+    + PartialOrd
+{
+    fn zero() -> T;
+    fn one() -> T;
+    fn from_f32(x: f32) -> T;
+    fn to_f32(self) -> f32;
+    fn from_usize(x: usize) -> T;
+    fn exp(self) -> Self;
+    fn sqrt(self) -> Self;
+    fn cos(self) -> Self;
+    fn sin(self) -> Self;
+    fn powf(self, x: T) -> T;
+}
+
+impl Float<f32> for f32 {
+    fn zero() -> f32 {
+        0.0
+    }
+    fn one() -> f32 {
+        1.0
+    }
+    fn from_f32(x: f32) -> f32 {
+        x
+    }
+    fn to_f32(self) -> f32 {
+        self
+    }
+    fn from_usize(x: usize) -> f32 {
+        x as f32
+    }
+    fn exp(self) -> f32 {
+        f32::exp(self)
+    }
+    fn sqrt(self) -> f32 {
+        f32::sqrt(self)
+    }
+    fn cos(self) -> f32 {
+        f32::cos(self)
+    }
+    fn sin(self) -> f32 {
+        f32::sin(self)
+    }
+    fn powf(self, x: f32) -> f32 {
+        f32::powf(self, x)
+    }
+}
+
+impl Float<f16> for f16 {
+    fn zero() -> f16 {
+        f16::from_f32(0.0)
+    }
+    fn one() -> f16 {
+        f16::from_f32(1.0)
+    }
+    fn from_f32(x: f32) -> f16 {
+        f16::from_f32(x)
+    }
+    fn to_f32(self) -> f32 {
+        self.into()
+    }
+    fn from_usize(x: usize) -> f16 {
+        f16::from_f32(x as f32)
+    }
+    fn exp(self) -> f16 {
+        f16::from_f32(f32::exp(self.to_f32()))
+    }
+    fn sqrt(self) -> f16 {
+        f16::from_f32(f32::sqrt(self.to_f32()))
+    }
+    fn cos(self) -> f16 {
+        f16::from_f32(f32::cos(self.to_f32()))
+    }
+    fn sin(self) -> f16 {
+        f16::from_f32(f32::sin(self.to_f32()))
+    }
+    fn powf(self, x: f16) -> f16 {
+        f16::from_f32(f32::powf(self.to_f32(), x.to_f32()))
+    }
+}
+
+// Tensor traits
 pub trait D<const DIM: usize> {
     fn shape(&self) -> [usize; DIM];
 }
 
-// Tensor
-#[derive(Debug)]
-pub struct Tensor<'a, T, const DIM: usize, E = ()> {
+pub struct MmapStore<U> {
+    phantom: PhantomData<U>,
+}
+pub struct SubStore<U> {
+    phantom: PhantomData<U>,
+}
+
+pub trait TensorTypes<T, const DIM: usize> {
+    type StoreType<'a>
+    where
+        T: 'a;
+    type ReaderType<'a>
+    where
+        T: 'a;
+    type WriterType<'a>
+    where
+        T: 'a;
+    type Shape;
+}
+
+impl<T, const DIM: usize> TensorTypes<T, DIM> for MmapStore<T> {
+    type Shape = [usize; DIM];
+    type StoreType<'a> = (Rc<Mmap>, &'a [T]) where T: 'a;
+    type ReaderType<'a> = (Self::Shape, &'a [T]) where T: 'a;
+    type WriterType<'a> = (Self::Shape, &'a mut [T]) where T: 'a;
+}
+
+impl<T, const DIM: usize> TensorTypes<T, DIM> for SubStore<T> {
+    type Shape = [usize; DIM];
+    type StoreType<'a> = &'a [T] where T: 'a;
+    type ReaderType<'a> = (Self::Shape, &'a [T]) where T: 'a;
+    type WriterType<'a> = (Self::Shape, &'a mut [T]) where T: 'a;
+}
+
+impl<const DIM: usize> TensorTypes<f32, DIM> for MmapStore<f16> {
+    type Shape = [usize; DIM];
+    type StoreType<'a> = (Rc<Mmap>, &'a [f16]);
+    type ReaderType<'a> = (Self::Shape, Vec<f32>);
+    type WriterType<'a> = (Self::Shape, &'a mut [f16]);
+}
+// Tensor /////////////////////////////////////////////////////////////////////
+pub struct Tensor<'a, T: 'a, const DIM: usize, U: TensorTypes<T, DIM>> {
     pub shape: [usize; DIM],
-    pub vec: Option<Vec<T>>, // Used after copy
-    pub slice: &'a [T],
-    pub ext: E,
+    pub store: U::StoreType<'a>,
+}
+
+pub trait TReader<T, const DIM: usize> {
+    type Reader<'b>: TRead<T, DIM>
+    where
+        Self: 'b;
+    fn reader<'a>(&'a self) -> Self::Reader<'a>;
+}
+
+pub trait TWriter<T: Copy, const DIM: usize> {
+    type Writer<'b>: TWrite<T, DIM>
+    where
+        Self: 'b;
+    fn writer<'a>(&'a mut self) -> Self::Writer<'a>;
 }
 
 pub trait TRead<T, const DIM: usize> {
     fn reading(&self) -> ([usize; DIM], &[T]);
-    // fn get(&mut self, idx: [usize; DIM]) -> &T {
-    //     let (shape, slice) = self.reading();
-    //     let mut index = 0;
-    //     debug_assert!(idx[DIM-1] < shape[DIM-1]);
-    //     for i in 0..DIM-1 {
-    //         index += idx[i] * shape[i]
-    //     };
-    //     &slice[index + idx[DIM-1]]
-    // }
 }
 
-pub trait TWrite<T: Copy, const DIM: usize> {
-    fn writing(&mut self) -> ([usize; DIM], &mut [T]);
-    // fn set(&'a mut self, idx: [usize; DIM], val: T) {
-    //     let (shape, slice) = self.writing();
-    //     let mut index = 0;
-    //     debug_assert!(idx[DIM-1] < shape[DIM-1]);
-    //     for i in 0..DIM-1 {
-    //         index += idx[i] * shape[i]
-    //     };
-    //     slice[index + idx[DIM-1]] = val
-    // }
-}
-
-impl<T, const DIM: usize> TRead<T, DIM> for Tensor<'_, T, DIM, ()> {
-    fn reading(&self) -> ([usize; DIM], &[T]) {
-        (self.shape, self.slice)
+impl<'a, T, const DIM: usize> TReader<T, DIM> for Tensor<'a, T, DIM, MmapStore<T>> {
+    type Reader<'b> = ([usize; DIM], &'b [T]) where Self: 'b;
+    fn reader<'c>(&'c self) -> Self::Reader<'c> {
+        (self.shape, &self.store.1)
     }
 }
 
-impl<'a, T, const DIM: usize> D<DIM> for Tensor<'a, T, DIM> {
+impl<'a, const DIM: usize> TReader<f32, DIM> for Tensor<'a, f32, DIM, MmapStore<f16>>
+where MmapStore<f16>: TensorTypes<f16, DIM> {
+    type Reader<'b> = ([usize; DIM], Vec<f32>) where Self: 'b;
+    fn reader<'c>(&'c self) -> Self::Reader<'c> {
+        let slice = self.store.1.iter().map(|&value| f32::from(value)).collect();
+        (self.shape, slice)
+    }
+}
+
+
+impl<'a, T, const DIM: usize> TReader<T, DIM> for Tensor<'a, T, DIM, SubStore<T>> {
+    type Reader<'b> = ([usize; DIM], &'b [T]) where Self: 'b;
+    fn reader(&self) -> Self::Reader<'a> {
+        (self.shape, &self.store)
+    }
+}
+
+impl<'a, 'b, T, const DIM: usize> TRead<T, DIM> for ([usize; DIM], &'b [T]) {
+    fn reading(&self) -> ([usize; DIM], &[T]) {
+        (self.0, self.1)
+    }
+}
+
+impl<'a, 'b, T, const DIM: usize> TRead<T, DIM> for ([usize; DIM], Vec<T>) {
+    fn reading(&self) -> ([usize; DIM], &[T]) {
+        (self.0, self.1.as_slice())
+    }
+}
+
+impl<'a, T: From<U>, U, const DIM: usize> D<DIM> for Tensor<'a, T, DIM, U>
+where
+    U: TensorTypes<T, DIM>,
+{
     fn shape(&self) -> [usize; DIM] {
         self.shape
     }
 }
 
-impl<'a, T, const DIM: usize, E> Clone for Tensor<'a, T, DIM, E>
-where
-    T: Clone,
-    E: Clone,
-{
-    fn clone(&self) -> Self {
-        let mut vec = Vec::from(self.slice);
-        let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
-        Tensor {
-            shape: self.shape,
-            vec: Some(vec),
-            slice: slice,
-            ext: self.ext.clone(),
-        }
-    }
+pub trait TWrite<T: Copy, const DIM: usize> {
+    fn writing(&mut self) -> ([usize; DIM], &mut [T]);
 }
 
-impl<T: Clone, const DIM: usize> TRead<T, DIM> for Tensor<'_, T, DIM, Option<Rc<Mmap>>> {
-    fn reading(&self) -> ([usize; DIM], &[T]) {
-        // match self.ext {
-        //     None => (),
-        //     Some(_) => {
-        //         let vec = self.slice.to_vec();
-        //         self.slice = unsafe { std::mem::transmute(vec.as_slice()) };
-        //         self.vec = Some(vec);
-        //         self.ext = None;
-        //         println!("Rc<Mmap> dropped");
-        //     }
-        // };
-        (self.shape, self.slice)
+impl<'a: 'b, 'b, T: Copy, const DIM: usize> TWrite<T, DIM> for ([usize; DIM], &'b mut [T]) {
+    fn writing(&mut self) -> ([usize; DIM], &mut [T]) {
+        (self.0, self.1)
     }
 }
 
@@ -102,13 +230,27 @@ pub struct TensorMut<'a, T, const DIM: usize> {
     pub slice: &'a mut [T],
 }
 
-impl<T, const DIM: usize> TRead<T, DIM> for TensorMut<'_, T, DIM> {
+impl<'a, T: Copy, const DIM: usize> TReader<T, DIM> for TensorMut<'a, T, DIM> {
+    type Reader<'b> = ([usize; DIM], &'b [T]) where Self: 'b;
+    fn reader(&self) -> ([usize; DIM], &[T]) {
+        (self.shape, self.slice)
+    }
+}
+
+impl<'a, T: Copy, const DIM: usize> TWriter<T, DIM> for TensorMut<'a, T, DIM> {
+    type Writer<'b> = ([usize; DIM], &'b mut [T]) where Self: 'b;
+    fn writer(&mut self) -> ([usize; DIM], &mut [T]) {
+        (self.shape, self.slice)
+    }
+}
+
+impl<'a, T, const DIM: usize> TRead<T, DIM> for TensorMut<'a, T, DIM> {
     fn reading(&self) -> ([usize; DIM], &[T]) {
         (self.shape, self.slice)
     }
 }
 
-impl<T: Copy, const DIM: usize> TWrite<T, DIM> for TensorMut<'_, T, DIM> {
+impl<'a, T: Copy, const DIM: usize> TWrite<T, DIM> for TensorMut<'_, T, DIM> {
     fn writing(&mut self) -> ([usize; DIM], &mut [T]) {
         (self.shape, self.slice)
     }
@@ -157,15 +299,12 @@ where
 }
 
 // Vector
-pub type Vector<'a, T> = Tensor<'a, T, 1>;
+pub type Vector<'a, T, U> = Tensor<'a, T, 1, U>;
 pub type VectorMut<'a, T> = TensorMut<'a, T, 1>;
 
-impl<'a, T> VectorMut<'a, T>
-where
-    T: Copy + Default,
-{
+impl<'a, T: Float<T>> VectorMut<'a, T> {
     pub fn new(i: usize) -> Self {
-        let mut vec = vec![T::default(); i];
+        let mut vec = vec![T::zero(); i];
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         VectorMut {
             shape: [i],
@@ -174,9 +313,9 @@ where
         }
     }
 
-    pub fn new_from(y: &'a mut Vector<'a, T>) -> Self {
-        let ([size], y_slice) = y.reading();
-        let mut vec = vec![T::default(); size];
+    pub fn new_from(y: &'a mut Vector<'a, T, SubStore<T>>) -> Self {
+        let ([size], y_slice) = y.reader();
+        let mut vec = vec![T::zero(); size];
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         for i in 0..size {
             vec[i] = y_slice[i];
@@ -192,12 +331,9 @@ where
 // Tensor2Mut
 pub type Tensor2Mut<'a, T> = TensorMut<'a, T, 2>;
 
-impl<'a, T> Tensor2Mut<'a, T>
-where
-    T: Copy + Default,
-{
+impl<'a, T: Float<T>> Tensor2Mut<'a, T> {
     pub fn new(i: usize, j: usize) -> Self {
-        let mut vec = vec![T::default(); i * j];
+        let mut vec = vec![T::zero(); i * j];
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         Tensor2Mut {
             shape: [i, j],
@@ -225,18 +361,8 @@ where
     }
 }
 
-pub type Tensor2<'a, T> = Tensor<'a, T, 2>;
-pub trait Tensorify2<'a, T> {
-    fn to_tensor2(&self) -> Tensor2<T>;
-}
-
-pub trait Vectorify<'a, T> {
-    fn to_vector(&self) -> Vector<T>;
-}
-
-pub trait VectorifyMut<'a, T> {
-    fn to_vector(&mut self) -> VectorMut<T>;
-}
+// Tensorify
+pub type Tensor2<'a, T, E> = Tensor<'a, T, 2, E>;
 
 const QK_K: usize = 256;
 const K_SCALE_SIZE: usize = 12;
@@ -378,17 +504,33 @@ pub fn dequantize_row_q6_k(x: &[BlockQ6K], y: &mut Vec<f32>, k: usize) -> usize 
     ycount
 }
 
-impl<'a, T> Index<usize> for Tensor<'a, T, 1> {
+impl<'a, T> Index<usize> for Tensor<'a, T, 1, MmapStore<T>> {
     type Output = T;
-    fn index(&self, index: usize) -> &Self::Output {
-        let (_, slice) = self.reading();
-        unsafe { slice.get_unchecked(index) }
+    fn index(&self, index: usize) -> &T {
+        let reader = self.reader();
+        let slice = reader.reading().1;
+        unsafe {
+            let slice: &'a [T] = std::mem::transmute(slice);
+            slice.get_unchecked(index)
+        }
+    }
+}
+
+impl<'a, T> Index<usize> for Tensor<'a, T, 1, SubStore<T>> {
+    type Output = T;
+    fn index(&self, index: usize) -> &T {
+        let reader = self.reader();
+        let slice = reader.reading().1;
+        unsafe {
+            let slice: &'a [T] = std::mem::transmute(slice);
+            slice.get_unchecked(index)
+        }
     }
 }
 
 impl<'a, T> Index<usize> for TensorMut<'a, T, 1> {
     type Output = T;
-    fn index(&self, index: usize) -> &Self::Output {
+    fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
         let (_, slice) = self.reading();
         unsafe { slice.get_unchecked(index) }
     }
@@ -421,15 +563,31 @@ impl<'a, T> IndexMut<(usize, usize)> for TensorMut<'a, T, 2> {
     }
 }
 
-impl<'a, T: Copy> Tensor2<'a, T> {
-    pub fn row(&'a self, i: usize) -> Vector<'a, T> {
-        let ([d0, d1], slice) = self.reading();
+pub trait Rowable<'a, T, U>
+where
+    U: TensorTypes<T, 1> + TensorTypes<T, 1>,
+{
+    fn row(&self, i: usize) -> Vector<'a, T, U>;
+}
+
+impl<'a, T: Copy> Rowable<'a, T, MmapStore<T>> for Tensor<'a, T, 2, MmapStore<T>> {
+    fn row(&self, i: usize) -> Vector<'a, T, MmapStore<T>> {
+        let ([d0, d1], _) = self.reader().reading();
         debug_assert!(i < d1);
         Vector {
             shape: [d0],
-            vec: None,
-            slice: &slice[i * d0..(i + 1) * d0],
-            ext: (),
+            store: (self.store.0.clone(), &self.store.1[i * d0..(i + 1) * d0]),
+        }
+    }
+}
+
+impl<'a> Rowable<'a, f32, MmapStore<f16>> for Tensor<'a, f32, 2, MmapStore<f16>> {
+    fn row(&self, i: usize) -> Vector<'a, f32, MmapStore<f16>> {
+        let ([d0, d1], _) = self.reader().reading();
+        debug_assert!(i < d1);
+        Vector {
+            shape: [d0],
+            store: (self.store.0.clone(), &self.store.1[i * d0..(i + 1) * d0]),
         }
     }
 }
@@ -446,7 +604,7 @@ impl<'a, T: Copy> Tensor2Mut<'a, T> {
     }
 }
 
-pub fn softmax<'a>(v: &'a mut impl TWrite<f32, 1>, size: usize) {
+pub fn softmax<T: Copy + Float<T>>(v: &mut impl TWrite<T, 1>, size: usize) {
     let ([d0], v) = v.writing();
     debug_assert!(size < d0);
     let mut max = v[0];
@@ -455,70 +613,72 @@ pub fn softmax<'a>(v: &'a mut impl TWrite<f32, 1>, size: usize) {
             max = v[i]
         }
     }
-    let mut sum = 0.0;
+    let mut sum = T::zero();
     for i in 0..size {
-        let val = f32::exp(v[i] - max);
+        let val = T::exp(v[i] - max);
         v[i] = val;
-        sum += val;
+        sum = sum + val;
     }
     for i in 0..size {
         v[i] = v[i] / sum;
     }
 }
 
-pub unsafe fn matmul<'a, 'b, W, T: Copy, S, V>(
-    v1: &'a mut impl TWrite<T, 1>,
-    m0: &'b mut impl TRead<S, 2>,
-    v0: &'b mut impl TRead<V, 1>,
+pub unsafe fn matmul<T>(
+    v1: &mut impl TWriter<T, 1>,
+    m0: &mut impl TReader<T, 2>,
+    v0: &mut impl TReader<T, 1>,
 ) where
-    W: Mul<W, Output = W>,
-    W: Add<W, Output = W> + Default + Copy,
-    V: Into<W> + Copy + 'b,
-    S: Into<W> + Copy + 'b,
-    W: Into<T> + 'b,
-    T: 'a,
+    T: Float<T>,
 {
-    let ([m0d0, m0d1], m0_slice) = m0.reading();
-    let ([v0d0], v0_slice) = v0.reading();
-    let ([v1d0], v1_slice) = v1.writing();
+    let m0_reader = m0.reader();
+    let ([m0d0, m0d1], m0_slice) = m0_reader.reading();
+    let v0_reader = v0.reader();
+    let ([v0d0], v0_slice) = v0_reader.reading();
+    let mut v1_writer = v1.writer();
+    let ([v1d0], v1_slice) = v1_writer.writing();
     debug_assert!(m0d0 == v0d0);
     debug_assert!(m0d1 == v1d0);
     for i in 0..m0d1 {
-        let mut r: W = W::default();
+        let mut r = T::zero();
         for j in 0..m0d0 {
-            r = r + m0_slice[i * m0d0 + j].into() * v0_slice[j].into();
+            r = r + m0_slice[i * m0d0 + j] * v0_slice[j];
         }
-        v1_slice[i] = r.into();
+        v1_slice[i] = r;
     }
 }
 
-pub fn rmsnorm<'a, 'b>(
-    xout: &'a mut impl TWrite<f32, 1>,
-    xin: &'a mut impl TRead<f32, 1>,
-    w: &'a mut impl TRead<f32, 1>,
-    epsilon: f32,
+pub fn rmsnorm<'a, 'b, T: Float<T>>(
+    xout: &'a mut impl TWriter<T, 1>,
+    xin: &'a mut impl TReader<T, 1>,
+    w: &'a mut impl TReader<T, 1>,
+    epsilon: T,
 ) {
+    let xin = xin.reader();
     let ([xind], xins) = xin.reading();
+    let w = w.reader();
     let ([_], ws) = w.reading();
+    let mut xout = xout.writer();
     let ([_], xouts) = xout.writing();
     let size = xind;
-    let mut ss = 0.0;
+    let mut ss = T::zero();
     for i in 0..size {
         ss = ss + xins[i] * xins[i];
     }
-    ss /= size as f32;
-    ss += epsilon;
-    ss = 1.0 / ss.sqrt();
+    ss = ss / T::from_usize(size) + epsilon;
+    ss = T::one() / ss.sqrt();
     for i in 0..size {
         xouts[i] = ws[i] * (ss * xins[i]);
     }
 }
 
-pub fn acc<'a, T>(x: &'a mut impl TWrite<T, 1>, y: &'a mut impl TRead<T, 1>)
+pub fn acc<'a, T>(x: &'a mut impl TWriter<T, 1>, y: &'a mut impl TReader<T, 1>)
 where
     T: Copy + Add<T, Output = T> + 'a,
 {
+    let mut x = x.writer();
     let ([xd], xs) = x.writing();
+    let y = y.reader();
     let ([yd], ys) = y.reading();
     debug_assert!(xd == yd);
     for i in 0..xd {
@@ -526,8 +686,10 @@ where
     }
 }
 
-pub fn cp<'a, T: Copy + 'a>(x: &'a mut impl TWrite<T, 1>, y: &'a mut impl TRead<T, 1>) {
+pub fn cp<'a, T: Copy + 'a>(x: &'a mut impl TWriter<T, 1>, y: &'a mut impl TReader<T, 1>) {
+    let y = y.reader();
     let ([yd], ys) = y.reading();
+    let mut x = x.writer();
     let ([xd], xs) = x.writing();
     debug_assert!(xd == yd);
     for i in 0..xd {

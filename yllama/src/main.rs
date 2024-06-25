@@ -11,15 +11,13 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::str;
 use yloader::{load_build, load_fast};
-use ymath::{max, VectorMut};
+use ymath::{max, Float, MmapStore, VectorMut};
+use half::f16;
 
-unsafe fn run<'a, T, M>(
-    mut llm: impl LLM<'a, T, u32, M>,
+unsafe fn run<'a, T: Float<T>, M>(
+    mut llm: impl LLM<'a, T, u32, M> + 'a,
     prompt: &str,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    T: Copy + Default + PartialOrd,
-{
+) -> Result<(), Box<dyn std::error::Error>> {
     let input = prompt;
     let tokens: Vec<u32> = llm.encode(input)?;
     let embed_size = llm.embedding_length();
@@ -61,14 +59,17 @@ unsafe fn process(
     match arch.as_str() {
         "llama" => {
             let model = load_build(path, gguf)?;
-            let runnable: Llama = LLM::build(&model, tokenizer_path)?;
+            type A = MmapStore<f32>;
+            type B = MmapStore<f16>;
+            let runnable: Llama<f32, B, B, A, B, B, B, A, B, B, A, B, B> = LLM::build(&model, tokenizer_path)?;
+
             run(runnable, prompt)
         }
-        "gpt" => {
-            let model = load_build(path, gguf)?;
-            let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
-            run(runnable, prompt)
-        }
+        // "gpt" => {
+        //     let model = load_build(path, gguf)?;
+        //     let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
+        //     run(runnable, prompt)
+        // }
         _ => anyhow::Result::Err(anyhow!("Unsupported architecture"))?,
     }?;
     Ok(())

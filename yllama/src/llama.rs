@@ -4,10 +4,8 @@ use tokenizers::tokenizer::Tokenizer;
 use yloader::*;
 use ymath::*;
 
-type ModelDescription<'a> = ModelFile<GGUFFile<MemLayout<'a, f32>>>;
-
 #[derive(Debug, Clone, Copy)]
-struct LlamaParams<T = usize, U = f32> {
+struct LlamaParams<U, T = usize> {
     block_count: T,
     _context_length: T,
     embedding_length: T,
@@ -22,79 +20,168 @@ struct LlamaParams<T = usize, U = f32> {
     attention_kv_length: T,
 }
 
-#[derive(Debug)]
 #[allow(dead_code)]
-struct LlamaBlock<'a, T = f32> {
+pub struct Llama<
+    'a,
+    T: Float<T>,
+    TokenEmbd = MmapStore<f32>,
+    Output = MmapStore<f32>,
+    OutputNorm = MmapStore<f32>,
+    AttnK = MmapStore<f32>,
+    AttnQ = MmapStore<f32>,
+    AttnV = MmapStore<f32>,
+    AttnNorm = MmapStore<f32>,
+    FfnDown = MmapStore<f32>,
+    FfnGate = MmapStore<f32>,
+    FfnNorm = MmapStore<f32>,
+    FfnUp = MmapStore<f32>,
+    AttnOutput = MmapStore<f32>,
+> where
+    AttnQ: TensorTypes<T, 2>,
+    AttnK: TensorTypes<T, 2>,
+    AttnV: TensorTypes<T, 2>,
+    AttnNorm: TensorTypes<T, 1>,
+    AttnOutput: TensorTypes<T, 2>,
+    FfnUp: TensorTypes<T, 2>,
+    FfnDown: TensorTypes<T, 2>,
+    FfnNorm: TensorTypes<T, 1>,
+    FfnGate: TensorTypes<T, 2>,
+    TokenEmbd: TensorTypes<T, 2>,
+    Output: TensorTypes<T, 2>,
+    OutputNorm: TensorTypes<T, 1>,
+{
+    params: LlamaParams<T, usize>,
+    blocks: Vec<
+        LlamaBlock<
+            'a,
+            T,
+            AttnK,
+            AttnQ,
+            AttnV,
+            AttnNorm,
+            FfnDown,
+            FfnGate,
+            FfnNorm,
+            FfnUp,
+            AttnOutput,
+        >,
+    >,
+    token_embd: Tensor2<'a, T, TokenEmbd>,
+    output: Tensor2<'a, T, Output>,
+    output_norm: Vector<'a, T, OutputNorm>,
+    tokenizer: Tokenizer,
+}
+
+#[allow(dead_code)]
+struct LlamaBlock<
+    'a,
+    T: Float<T>,
+    AttnK,
+    AttnQ,
+    AttnV,
+    AttnNorm,
+    FfnDown,
+    FfnGate,
+    FfnNorm,
+    FfnUp,
+    AttnOutput,
+> where
+    AttnQ: TensorTypes<T, 2>,
+    AttnK: TensorTypes<T, 2>,
+    AttnV: TensorTypes<T, 2>,
+    AttnNorm: TensorTypes<T, 1>,
+    AttnOutput: TensorTypes<T, 2>,
+    FfnUp: TensorTypes<T, 2>,
+    FfnDown: TensorTypes<T, 2>,
+    FfnNorm: TensorTypes<T, 1>,
+    FfnGate: TensorTypes<T, 2>,
+{
     i: usize,
-    params: LlamaParams,
+    params: LlamaParams<T>,
 
     // Model weights
-    attn_q: Tensor2<'a, T>,
-    attn_k: Tensor2<'a, T>,
-    attn_v: Tensor2<'a, T>,
-    attn_norm: Vector<'a, T>,
-    attn_ouput: Tensor2<'a, T>,
-    ffn_down: Tensor2<'a, T>,
-    ffn_up: Tensor2<'a, T>,
-    ffn_norm: Vector<'a, T>,
-    ffn_gate: Tensor2<'a, T>,
+    attn_q: Tensor2<'a, T, AttnQ>,
+    attn_k: Tensor2<'a, T, AttnK>,
+    attn_v: Tensor2<'a, T, AttnV>,
+    attn_norm: Vector<'a, T, AttnNorm>,
+    attn_ouput: Tensor2<'a, T, AttnOutput>,
+    ffn_down: Tensor2<'a, T, FfnDown>,
+    ffn_up: Tensor2<'a, T, FfnUp>,
+    ffn_norm: Vector<'a, T, FfnNorm>,
+    ffn_gate: Tensor2<'a, T, FfnGate>,
 
     // Block state
     xb: VectorMut<'a, T>,
     xb2: VectorMut<'a, T>,
     hb: VectorMut<'a, T>,
-    hb2: VectorMut<'a, f32>,
+    hb2: VectorMut<'a, T>,
     q: VectorMut<'a, T>,
     k_cache: Tensor2Mut<'a, T>,
     v_cache: Tensor2Mut<'a, T>,
     attn_score: Tensor2Mut<'a, T>,
 }
 
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct Llama<'a, T = f32> {
-    params: LlamaParams,
-    blocks: Vec<LlamaBlock<'a>>,
-    token_embd: Tensor2<'a, T>,
-    output: Tensor2<'a, T>,
-    output_norm: Vector<'a, T>,
-    // tokens: Vec<&'a String>,
-    tokenizer: Tokenizer,
-}
+impl<
+        'a,
+        T: Float<T>,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+    > LlamaBlock<'a, T, AttnK, AttnQ, AttnV, AttnNorm, FfnDown, FfnGate, FfnNorm, FfnUp, AttnOutput>
+where
+    AttnQ: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnQ>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnQ, &'a ModelFile>,
 
-macro_rules! trans {
-    ($func:ident($($arg:expr),*)) => {
-        $func($($arg),*);
-    };
-}
+    AttnK: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnK>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnK, &'a ModelFile>,
 
-impl<'a> LlamaBlock<'a, f32> {
-    fn new(
-        model: &'a ModelDescription,
-        i: usize,
-        params: LlamaParams,
-    ) -> Result<LlamaBlock<'a, f32>, anyhow::Error> {
+    AttnV: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnV>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnV, &'a ModelFile>,
+
+    AttnNorm: TensorTypes<T, 1>,
+    Tensor<'a, T, 1, AttnNorm>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, AttnNorm, &'a ModelFile>,
+
+    AttnOutput: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnOutput>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnOutput, &'a ModelFile>,
+
+    FfnUp: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnUp>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnUp, &'a ModelFile>,
+
+    FfnDown: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnDown>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnDown, &'a ModelFile>,
+
+    FfnNorm: TensorTypes<T, 1>,
+    Tensor<'a, T, 1, FfnNorm>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, FfnNorm, &'a ModelFile>,
+
+    FfnGate: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnGate>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnGate, &'a ModelFile>,
+{
+    fn new(model: &'a ModelFile, i: usize, params: LlamaParams<T>) -> Result<Self, anyhow::Error> {
         macro_rules! build_tensor {
             ($s:expr) => {{
                 let name = format!($s, i);
                 model
-                    .model
                     .tensors
                     .get(&name)
                     .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor2())?
-            }};
-        }
-
-        macro_rules! build_vector {
-            ($s:expr) => {{
-                let name = format!($s, i);
-                model
-                    .model
-                    .tensors
-                    .get(&name)
-                    .ok_or_else(|| anyhow!("vector {} not found", name))
-                    .map(|x| x.to_vector())?
+                    .map(|x| x.to_tensor(model))
+                    .unwrap()
+                    .unwrap()
             }};
         }
 
@@ -102,13 +189,13 @@ impl<'a> LlamaBlock<'a, f32> {
         let attn_q = build_tensor!("blk.{}.attn_q.weight");
         let attn_k = build_tensor!("blk.{}.attn_k.weight");
         let attn_v = build_tensor!("blk.{}.attn_v.weight");
-        let attn_norm = build_vector!("blk.{}.attn_norm.weight");
+        let attn_norm = build_tensor!("blk.{}.attn_norm.weight");
         let attn_ouput = build_tensor!("blk.{}.attn_output.weight");
 
         // Forward network
         let ffn_down = build_tensor!("blk.{}.ffn_down.weight");
         let ffn_up = build_tensor!("blk.{}.ffn_up.weight");
-        let ffn_norm = build_vector!("blk.{}.ffn_norm.weight");
+        let ffn_norm = build_tensor!("blk.{}.ffn_norm.weight");
         let ffn_gate = build_tensor!("blk.{}.ffn_gate.weight");
 
         // Mutable
@@ -145,26 +232,26 @@ impl<'a> LlamaBlock<'a, f32> {
     }
 
     #[inline(always)]
-    unsafe fn forward(&mut self, x: &mut VectorMut<f32>, pos: usize) {
+    unsafe fn forward(&mut self, x: &mut VectorMut<T>, pos: usize) {
         let xb = &mut self.xb;
         let xb2 = &mut self.xb2;
         let hb = &mut self.hb;
         let hb2 = &mut self.hb2;
 
-        trans!(rmsnorm(
+        rmsnorm(
             xb,
             x,
             &mut self.attn_norm,
-            self.params.attention_layer_norm_rms_epsilon
-        ));
+            self.params.attention_layer_norm_rms_epsilon,
+        );
 
         // q, v and k for this position
         let q = &mut self.q;
         let k = &mut self.k_cache.row(pos);
         let v = &mut self.v_cache.row(pos);
-        matmul::<f32, _, _, _>(q, &mut self.attn_q, xb);
-        matmul::<f32, _, _, _>(k, &mut self.attn_k, xb);
-        matmul::<f32, _, _, _>(v, &mut self.attn_v, xb);
+        matmul::<T>(q, &mut self.attn_q, xb);
+        matmul::<T>(k, &mut self.attn_k, xb);
+        matmul::<T>(v, &mut self.attn_v, xb);
 
         // RoPE
         let attn_head_size = self.params.embedding_length / self.params.attention_head_count;
@@ -172,11 +259,14 @@ impl<'a> LlamaBlock<'a, f32> {
         debug_assert!(attn_head_size == 128);
         for i in 0..self.params.attention_head_count {
             for j in (0..attn_head_size).step_by(2) {
-                let freq =
-                    1.0 / f32::powf(self.params.rope_freq_base, j as f32 / attn_head_size as f32);
-                let val = pos as f32 * freq;
-                let fcr = f32::cos(val);
-                let fci = f32::sin(val);
+                let freq = T::one()
+                    / T::powf(
+                        self.params.rope_freq_base,
+                        T::from_usize(j) / T::from_usize(attn_head_size),
+                    );
+                let val = T::from_usize(pos) * freq;
+                let fcr = T::cos(val);
+                let fci = T::sin(val);
                 let q0 = q[i * attn_head_size + j];
                 let q1 = q[i * attn_head_size + j + 1];
                 q[i * attn_head_size + j] = q0 * fcr - q1 * fci;
@@ -195,13 +285,13 @@ impl<'a> LlamaBlock<'a, f32> {
             let attn_score = &mut self.attn_score.row(h);
             let q_offset = h * attn_head_size;
             for t in 0..(pos + 1) {
-                let mut score = 0.0;
+                let mut score = T::zero();
                 let k = &mut self.k_cache.row(t);
                 let k_offset = (h / kv_mul) * attn_head_size;
                 for i in 0..attn_head_size {
-                    score += q[q_offset + i] * k[k_offset + i];
+                    score = score + q[q_offset + i] * k[k_offset + i];
                 }
-                score /= f32::sqrt(attn_head_size as f32);
+                score = score / T::sqrt(T::from_usize(attn_head_size));
                 attn_score[t] = score;
             }
 
@@ -211,7 +301,7 @@ impl<'a> LlamaBlock<'a, f32> {
             // Weighted sum of the values, store back into xb
             let xb_offset = h * attn_head_size;
             for i in 0..attn_head_size {
-                xb[xb_offset + i] = 0.0; // TODO: Optimize? Can we memset?
+                xb[xb_offset + i] = T::zero(); // TODO: Optimize? Can we memset?
             }
             for t in 0..(pos + 1) {
                 // Attention weight for this timesetp
@@ -226,31 +316,31 @@ impl<'a> LlamaBlock<'a, f32> {
         }
 
         // Output of attention
-        matmul::<f32, _, _, _>(xb2, &mut self.attn_ouput, xb);
+        matmul::<T>(xb2, &mut self.attn_ouput, xb);
 
         // Residual
         acc(x, xb2);
 
         // Ffn rmsnorm
-        trans!(rmsnorm(
+        rmsnorm(
             xb,
             x,
             &mut self.ffn_norm,
-            self.params.attention_layer_norm_rms_epsilon
-        ));
+            self.params.attention_layer_norm_rms_epsilon,
+        );
 
         // Non-linearity
-        matmul::<f32, _, _, _>(hb, &mut self.ffn_gate, xb);
-        matmul::<f32, _, _, _>(hb2, &mut self.ffn_up, xb);
+        matmul::<T>(hb, &mut self.ffn_gate, xb);
+        matmul::<T>(hb2, &mut self.ffn_up, xb);
         for i in 0..self.params.feed_forward_length {
             let mut val = hb[i];
-            val *= 1.0 / (1.0 + f32::exp(-val));
-            val *= hb2[i];
+            val = val * (T::one() / (T::one() + T::exp(-val)));
+            val = val * hb2[i];
             hb[i] = val;
         }
 
         // Ffn output
-        matmul::<f32, _, _, _>(xb, &mut self.ffn_down, hb);
+        matmul::<T>(xb, &mut self.ffn_down, hb);
 
         // Residual
         acc(x, xb);
@@ -261,9 +351,86 @@ fn conv_err(b: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::
     b
 }
 
-impl<'a> Llama<'a> {
-    fn new(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Llama<'a>, anyhow::Error> {
-        let header = &model.model.header;
+impl<
+        'a,
+        T: Float<T>,
+        TokenEmbd,
+        Output,
+        OutputNorm,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+    >
+    Llama<
+        'a,
+        T,
+        TokenEmbd,
+        Output,
+        OutputNorm,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+    >
+where
+    AttnQ: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnQ>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnQ, &'a ModelFile>,
+
+    AttnK: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnK>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnK, &'a ModelFile>,
+
+    AttnV: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnV>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnV, &'a ModelFile>,
+
+    AttnNorm: TensorTypes<T, 1>,
+    Tensor<'a, T, 1, AttnNorm>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, AttnNorm, &'a ModelFile>,
+
+    AttnOutput: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnOutput>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnOutput, &'a ModelFile>,
+
+    FfnUp: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnUp>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnUp, &'a ModelFile>,
+
+    FfnDown: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnDown>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnDown, &'a ModelFile>,
+
+    FfnNorm: TensorTypes<T, 1>,
+    Tensor<'a, T, 1, FfnNorm>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, FfnNorm, &'a ModelFile>,
+
+    FfnGate: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnGate>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnGate, &'a ModelFile>,
+
+    TokenEmbd: TensorTypes<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, TokenEmbd, &'a ModelFile>,
+
+    Output: TensorTypes<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, Output, &'a ModelFile>,
+
+    OutputNorm: TensorTypes<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, OutputNorm, &'a ModelFile>,
+{
+    fn new(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
+        let header = &model.header;
 
         // Huggingface tokenizer
         // TODO: implement a local algorithm using using data in GGUF
@@ -275,18 +442,18 @@ impl<'a> Llama<'a> {
         let embedding_length = header_find_usize(header, "llama.embedding_length")?;
         let attention_head_count_kv = header_find_usize(header, "llama.attention.head_count_kv")?;
         let attention_head_count = header_find_usize(header, "llama.attention.head_count")?;
-        let params = LlamaParams {
+        let params: LlamaParams<T> = LlamaParams {
             block_count: header_find_usize(header, "llama.block_count")?,
             _context_length: header_find_usize(header, "llama.context_length")?,
             embedding_length,
             feed_forward_length: header_find_usize(header, "llama.feed_forward_length")?,
             attention_head_count,
             attention_head_count_kv,
-            attention_layer_norm_rms_epsilon: header_find_f32(
+            attention_layer_norm_rms_epsilon: T::from_f32(header_find_f32(
                 header,
                 "llama.attention.layer_norm_rms_epsilon",
-            )?,
-            rope_freq_base: header_find_f32(header, "llama.rope.freq_base")?,
+            )?),
+            rope_freq_base: T::from_f32(header_find_f32(header, "llama.rope.freq_base")?),
             _rope_dimension_count: header_find_usize(header, "llama.rope.dimension_count")?,
             vocab_size: header_find_usize(header, "llama.vocab_size")?,
             max_seq_len: 2048, // Where does it come from?
@@ -297,31 +464,19 @@ impl<'a> Llama<'a> {
             ($s:expr) => {{
                 let name = $s;
                 model
-                    .model
                     .tensors
                     .get(name)
                     .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor2())?
-            }};
-        }
-
-        macro_rules! build_vector {
-            ($s:expr) => {{
-                let name = $s;
-                model
-                    .model
-                    .tensors
-                    .get(name)
-                    .ok_or_else(|| anyhow!("vector {} not found", name))
-                    .map(|x| x.to_vector())?
+                    .map(|x| x.to_tensor(model))?
+                    .unwrap()
             }};
         }
 
         let token_embd = build_tensor!("token_embd.weight");
         let output = build_tensor!("output.weight");
-        let output_norm = build_vector!("output_norm.weight");
+        let output_norm = build_tensor!("output_norm.weight");
 
-        let blocks: Result<Vec<LlamaBlock>, anyhow::Error> = (0..params.block_count)
+        let blocks: Result<Vec<_>, anyhow::Error> = (0..params.block_count)
             .into_iter()
             .map(|i| LlamaBlock::new(&model, i, params))
             .collect();
@@ -340,8 +495,89 @@ impl<'a> Llama<'a> {
     }
 }
 
-impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
-    fn build<'b>(model: &'a ModelDescription, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
+impl<
+        'a,
+        T: Float<T>,
+        TokenEmbd,
+        Output,
+        OutputNorm,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+    > LLM<'a, T, u32, ModelFile>
+    for Llama<
+        'a,
+        T,
+        TokenEmbd,
+        Output,
+        OutputNorm,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+    >
+where
+    AttnQ: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnQ>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnQ, &'a ModelFile>,
+
+    AttnK: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnK>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnK, &'a ModelFile>,
+
+    AttnV: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnV>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnV, &'a ModelFile>,
+
+    AttnNorm: TensorTypes<T, 1>,
+    Tensor<'a, T, 1, AttnNorm>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, AttnNorm, &'a ModelFile>,
+
+    AttnOutput: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, AttnOutput>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, AttnOutput, &'a ModelFile>,
+
+    FfnUp: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnUp>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnUp, &'a ModelFile>,
+
+    FfnDown: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnDown>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnDown, &'a ModelFile>,
+
+    FfnNorm: TensorTypes<T, 1>,
+    Tensor<'a, T, 1, FfnNorm>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, FfnNorm, &'a ModelFile>,
+
+    FfnGate: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, FfnGate>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, FfnGate, &'a ModelFile>,
+
+    TokenEmbd: TensorTypes<T, 2> + TensorTypes<T, 1>,
+    Tensor<'a, T, 2, TokenEmbd>: TReader<T, 2> + Rowable<'a, T, TokenEmbd>,
+    Tensor<'a, T, 1, TokenEmbd>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, TokenEmbd, &'a ModelFile>,
+
+    Output: TensorTypes<T, 2>,
+    Tensor<'a, T, 2, Output>: TReader<T, 2>,
+    GGUFTensor<()>: Tensorify<'a, T, 2, Output, &'a ModelFile>,
+
+    OutputNorm: TensorTypes<T, 1>,
+    Tensor<'a, T, 1, OutputNorm>: TReader<T, 1>,
+    GGUFTensor<()>: Tensorify<'a, T, 1, OutputNorm, &'a ModelFile>,
+{
+    fn build<'b>(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
         Ok(Llama::new(&model, tokenizer_path)?)
     }
 
@@ -360,7 +596,7 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
         Ok(r.get_ids().iter().map(|t| *t).collect())
     }
 
-    fn embed(&self, x: &mut VectorMut<f32>, token: u32, _pos: usize) {
+    fn embed(&mut self, x: &mut VectorMut<T>, token: u32, _pos: usize) {
         cp(x, &mut self.token_embd.row(token as usize))
     }
 
@@ -368,17 +604,17 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
         self.tokenizer.decode(tokens, false).unwrap()
     }
 
-    unsafe fn forward(&mut self, x: &mut VectorMut<f32>, pos: usize) {
+    unsafe fn forward(&mut self, x: &mut VectorMut<T>, pos: usize) {
         self.blocks
             .iter_mut()
             .for_each(|block| block.forward(x, pos));
     }
 
-    unsafe fn block_forward(&mut self, x: &mut VectorMut<f32>, pos: usize, block: usize) {
+    unsafe fn block_forward(&mut self, x: &mut VectorMut<T>, pos: usize, block: usize) {
         self.blocks[block].forward(x, pos)
     }
 
-    unsafe fn logits(&mut self, logits: &mut VectorMut<f32>, x: &mut VectorMut<f32>) {
+    unsafe fn logits(&mut self, logits: &mut VectorMut<T>, x: &mut VectorMut<T>) {
         // Final rmsnorm
         let mut x2 = VectorMut::new(self.params.embedding_length);
         rmsnorm(
@@ -388,6 +624,6 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Llama<'a> {
             self.params.attention_layer_norm_rms_epsilon,
         );
         // Last act: logits
-        matmul::<f32, _, _, _>(logits, &mut self.output, &mut x2);
+        matmul::<T>(logits, &mut self.output, &mut x2);
     }
 }
