@@ -450,7 +450,7 @@ where
             rope_freq_base: T::from(header_find_f32(header, "llama.rope.freq_base")?).unwrap(),
             _rope_dimension_count: header_find_usize(header, "llama.rope.dimension_count")?,
             vocab_size: header_find_usize(header, "llama.vocab_size")?,
-            max_seq_len: 2048, // Where does it come from?
+            max_seq_len: header_find_usize(header, "llama.context_length")?,
             attention_kv_length: embedding_length * attention_head_count_kv / attention_head_count,
         };
 
