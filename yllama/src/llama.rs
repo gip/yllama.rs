@@ -3,7 +3,10 @@ use anyhow::anyhow;
 use num_traits::float::Float;
 use tokenizers::tokenizer::Tokenizer;
 use yloader::*;
-use ymath::*;
+use ymath::function::{acc, cp, matmul, rmsnorm, softmax};
+use ymath::tensor::*;
+
+type DefaultMmap = MmapStore<f32, f32>;
 
 #[derive(Debug, Clone, Copy)]
 struct LlamaParams<U, T = usize> {
@@ -25,18 +28,18 @@ struct LlamaParams<U, T = usize> {
 pub struct Llama<
     'a,
     T: Float,
-    TokenEmbd = MmapStore<f32>,
-    Output = MmapStore<f32>,
-    OutputNorm = MmapStore<f32>,
-    AttnK = MmapStore<f32>,
-    AttnQ = MmapStore<f32>,
-    AttnV = MmapStore<f32>,
-    AttnNorm = MmapStore<f32>,
-    FfnDown = MmapStore<f32>,
-    FfnGate = MmapStore<f32>,
-    FfnNorm = MmapStore<f32>,
-    FfnUp = MmapStore<f32>,
-    AttnOutput = MmapStore<f32>,
+    TokenEmbd = DefaultMmap,
+    Output = DefaultMmap,
+    OutputNorm = DefaultMmap,
+    AttnK = DefaultMmap,
+    AttnQ = DefaultMmap,
+    AttnV = DefaultMmap,
+    AttnNorm = DefaultMmap,
+    FfnDown = DefaultMmap,
+    FfnGate = DefaultMmap,
+    FfnNorm = DefaultMmap,
+    FfnUp = DefaultMmap,
+    AttnOutput = DefaultMmap,
 > where
     AttnQ: TensorTypes<T, 2>,
     AttnK: TensorTypes<T, 2>,
@@ -607,7 +610,7 @@ where
 
     unsafe fn logits(&mut self, logits: &mut VectorMut<T>, x: &mut VectorMut<T>) {
         // Final rmsnorm
-        let mut x2 = VectorMut::new(self.params.embedding_length);
+        let mut x2: TensorMut<T, 1> = VectorMut::new(self.params.embedding_length);
         rmsnorm(
             &mut x2,
             x,
@@ -626,6 +629,8 @@ pub fn llama_find_type(model: &ModelFile) -> Result<&str, anyhow::Error> {
     };
 
     let token_embd = find("token_embd.weight")?;
+    let output = find("output.weight")?;
+    println!("{:?}", output);
     if token_embd == GGMLType::F32 {
         Ok("F32")
     } else {

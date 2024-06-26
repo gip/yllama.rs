@@ -1,7 +1,7 @@
 use crate::model::LLM;
 use anyhow::*;
 use yloader::*;
-use ymath::*;
+use ymath::tensor::*;
 
 type ModelDescription<'a> = ModelFile;
 

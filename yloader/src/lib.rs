@@ -7,13 +7,12 @@ use memmap2::{Mmap, MmapOptions};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fs::File;
-use std::mem::size_of;
 use std::rc::Rc;
 
 mod gguf;
 pub use gguf::GGMLType;
 use gguf::{read_gguf_file, GGUFHeader};
-use ymath::{MmapStore, Tensor, TensorTypes};
+use ymath::tensor::{MmapStore, Tensor, TensorTypes, VecStore};
 
 #[derive(Debug)]
 pub struct ModelFile<E = ()> {
@@ -32,11 +31,13 @@ where
     fn to_tensor(&self, mf: MF) -> Result<Tensor<'a, T, DIM, U>, Box<dyn std::error::Error>>;
 }
 
-impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, MmapStore<f32>, &ModelFile> for GGUFTensor<()> {
+impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, MmapStore<f32, f32>, &ModelFile>
+    for GGUFTensor<()>
+{
     fn to_tensor(
         &self,
         model: &ModelFile,
-    ) -> Result<Tensor<'a, f32, DIM, MmapStore<f32>>, Box<dyn std::error::Error>> {
+    ) -> Result<Tensor<'a, f32, DIM, MmapStore<f32, f32>>, Box<dyn std::error::Error>> {
         let d = self.dimensions.len();
         if DIM != d {
             return Err(anyhow::anyhow!("wrong dimension for tensor '{}'", &self.name).into());
@@ -51,9 +52,7 @@ impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, MmapStore<f32>, &ModelFile> f
         let base_ptr = mmap.as_ptr();
         let data = unsafe { base_ptr.add((tensor_data_offset + self.relative_offset) as usize) };
         let slice = match self.tensor_type {
-            GGMLType::F32 => unsafe {
-                std::slice::from_raw_parts(data as *const f32, size_of::<f32>() * n_elem)
-            },
+            GGMLType::F32 => unsafe { std::slice::from_raw_parts(data as *const f32, n_elem) },
             _ => return Err(anyhow::anyhow!("wrong type for tensor '{}'", &self.name).into()),
         };
         Ok(Tensor {
@@ -63,11 +62,13 @@ impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, MmapStore<f32>, &ModelFile> f
     }
 }
 
-impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, MmapStore<f16>, &ModelFile> for GGUFTensor<()> {
+impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, MmapStore<f32, f16>, &ModelFile>
+    for GGUFTensor<()>
+{
     fn to_tensor(
         &self,
         model: &ModelFile,
-    ) -> Result<Tensor<'a, f32, DIM, MmapStore<f16>>, Box<dyn std::error::Error>> {
+    ) -> Result<Tensor<'a, f32, DIM, MmapStore<f32, f16>>, Box<dyn std::error::Error>> {
         let d = self.dimensions.len();
         if DIM != d {
             return Err(anyhow::anyhow!("wrong dimension for tensor '{}'", &self.name).into());
@@ -82,15 +83,76 @@ impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, MmapStore<f16>, &ModelFile> f
         let base_ptr = mmap.as_ptr();
         let data = unsafe { base_ptr.add((tensor_data_offset + self.relative_offset) as usize) };
         let slice = match self.tensor_type {
-            GGMLType::F16 => unsafe {
-                std::slice::from_raw_parts(data as *const f16, size_of::<f16>() * n_elem)
-            },
+            GGMLType::F16 => unsafe { std::slice::from_raw_parts(data as *const f16, n_elem) },
             _ => return Err(anyhow::anyhow!("wrong type for tensor '{}'", &self.name).into()),
         };
         Ok(Tensor {
             shape,
             store: (Rc::clone(mmap), slice),
         })
+    }
+}
+
+impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, VecStore<f32, f32>, &ModelFile>
+    for GGUFTensor<()>
+{
+    fn to_tensor(
+        &self,
+        model: &ModelFile,
+    ) -> Result<Tensor<'a, f32, DIM, VecStore<f32, f32>>, Box<dyn std::error::Error>> {
+        let d = self.dimensions.len();
+        if DIM != d {
+            return Err(anyhow::anyhow!("wrong dimension for tensor '{}'", &self.name).into());
+        };
+        let mut shape: [usize; DIM] = [0; DIM];
+        for i in 0..d {
+            shape[i] = self.dimensions[i] as usize
+        }
+        let n_elem: usize = self.dimensions.iter().fold(1, |a, b| a * b) as usize;
+        let mmap = &model.mmap;
+        let tensor_data_offset = model.tensor_data_offset;
+        let base_ptr = mmap.as_ptr();
+        let data = unsafe { base_ptr.add((tensor_data_offset + self.relative_offset) as usize) };
+        let slice = match self.tensor_type {
+            GGMLType::F32 => unsafe { std::slice::from_raw_parts(data as *const f32, n_elem) },
+            _ => return Err(anyhow::anyhow!("wrong type for tensor '{}'", &self.name).into()),
+        };
+        Ok(Tensor {
+            shape,
+            store: slice.to_vec(),
+        })
+    }
+}
+
+impl<'a, const DIM: usize> Tensorify<'a, f32, DIM, VecStore<f32, f16>, &ModelFile>
+    for GGUFTensor<()>
+{
+    fn to_tensor(
+        &self,
+        model: &ModelFile,
+    ) -> Result<Tensor<'a, f32, DIM, VecStore<f32, f16>>, Box<dyn std::error::Error>> {
+        let d = self.dimensions.len();
+        if DIM != d {
+            return Err(anyhow::anyhow!("wrong dimension for tensor '{}'", &self.name).into());
+        };
+        let mut shape: [usize; DIM] = [0; DIM];
+        for i in 0..d {
+            shape[i] = self.dimensions[i] as usize
+        }
+        let n_elem: usize = self.dimensions.iter().fold(1, |a, b| a * b) as usize;
+        let mmap = &model.mmap;
+        let tensor_data_offset = model.tensor_data_offset;
+        let base_ptr = mmap.as_ptr();
+        let data = unsafe { base_ptr.add((tensor_data_offset + self.relative_offset) as usize) };
+        let slice = match self.tensor_type {
+            GGMLType::F16 => unsafe { std::slice::from_raw_parts(data as *const f16, n_elem) },
+            _ => return Err(anyhow::anyhow!("wrong type for tensor '{}'", &self.name).into()),
+        };
+        let mut vec = vec![0.0; n_elem];
+        for i in 0..n_elem {
+            vec[i] = slice[i].into();
+        }
+        Ok(Tensor { shape, store: vec })
     }
 }
 

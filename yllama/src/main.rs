@@ -13,7 +13,8 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::str;
 use yloader::{load_build, load_fast};
-use ymath::{max, MmapStore, VectorMut};
+use ymath::function::max;
+use ymath::tensor::{MmapStore, VecStore, VectorMut};
 
 unsafe fn run<'a, T: Float, M>(
     mut llm: impl LLM<'a, T, u32, M> + 'a,
@@ -57,12 +58,14 @@ unsafe fn process(
     match arch.as_str() {
         "llama" => {
             let model = load_build(path, gguf)?;
-            type A = MmapStore<f32>;
-            type B = MmapStore<f16>;
+            type A = MmapStore<f32, f32>;
+            type B = MmapStore<f32, f16>;
+            // type C = VecStore<f32, f16>;
+            type D = VecStore<f32, f32>;
             let typ = llama::llama_find_type(&model)?;
             match typ {
                 "F16" => {
-                    let runnable: Llama<f32, B, B, A, B, B, B, A, B, B, A, B, B> =
+                    let runnable: Llama<f32, B, B, A, B, B, B, D, B, B, A, B, B> =
                         LLM::build(&model, tokenizer_path)?;
                     run(runnable, prompt)
                 }
