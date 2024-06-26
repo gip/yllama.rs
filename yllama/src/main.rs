@@ -5,16 +5,17 @@ pub mod model;
 use anyhow::anyhow;
 use clap::Parser;
 pub use gpt::Gpt;
-pub use llama::Llama;
+use half::f16;
+use llama::Llama;
 use model::LLM;
+use num_traits::float::Float;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::str;
 use yloader::{load_build, load_fast};
-use ymath::{max, Float, MmapStore, VectorMut};
-use half::f16;
+use ymath::{max, MmapStore, VectorMut};
 
-unsafe fn run<'a, T: Float<T>, M>(
+unsafe fn run<'a, T: Float, M>(
     mut llm: impl LLM<'a, T, u32, M> + 'a,
     prompt: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -27,15 +28,12 @@ unsafe fn run<'a, T: Float<T>, M>(
     let mut next_token = tokens[0];
     let mut chat = vec![];
     for pos in 0..1024 {
-        //for (pos, token) in tokens.iter().enumerate() {
-        //println!("Input {} '{}'", next_token, llm.decode(next_token));
         chat.push(next_token);
         println!("{}", llm.decode(&chat));
         llm.embed(&mut x, next_token, pos);
         llm.forward(&mut x, pos);
         llm.logits(&mut logits, &mut x);
         let (tk, _) = max(&mut logits);
-        // println!("Predicted {} '{}'", tk, llm.decode(tk as u32));
         if pos + 1 < tokens.len() {
             next_token = tokens[pos + 1];
         } else {
@@ -61,15 +59,26 @@ unsafe fn process(
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32>;
             type B = MmapStore<f16>;
-            let runnable: Llama<f32, B, B, A, B, B, B, A, B, B, A, B, B> = LLM::build(&model, tokenizer_path)?;
-
+            let typ = llama::llama_find_type(&model)?;
+            match typ {
+                "F16" => {
+                    let runnable: Llama<f32, B, B, A, B, B, B, A, B, B, A, B, B> =
+                    LLM::build(&model, tokenizer_path)?;
+                    run(runnable, prompt)
+                },
+                "F32" => {
+                    let runnable: Llama<f32> =
+                    LLM::build(&model, tokenizer_path)?;
+                    run(runnable, prompt)
+                },
+                _ => Err(anyhow!("Unknown configuration").into())
+            }
+        }
+        "gpt" => {
+            let model = load_build(path, gguf)?;
+            let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
             run(runnable, prompt)
         }
-        // "gpt" => {
-        //     let model = load_build(path, gguf)?;
-        //     let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
-        //     run(runnable, prompt)
-        // }
         _ => anyhow::Result::Err(anyhow!("Unsupported architecture"))?,
     }?;
     Ok(())

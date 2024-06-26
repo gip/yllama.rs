@@ -1,5 +1,6 @@
 use crate::model::LLM;
 use anyhow::anyhow;
+use num_traits::float::Float;
 use tokenizers::tokenizer::Tokenizer;
 use yloader::*;
 use ymath::*;
@@ -23,7 +24,7 @@ struct LlamaParams<U, T = usize> {
 #[allow(dead_code)]
 pub struct Llama<
     'a,
-    T: Float<T>,
+    T: Float,
     TokenEmbd = MmapStore<f32>,
     Output = MmapStore<f32>,
     OutputNorm = MmapStore<f32>,
@@ -75,7 +76,7 @@ pub struct Llama<
 #[allow(dead_code)]
 struct LlamaBlock<
     'a,
-    T: Float<T>,
+    T: Float,
     AttnK,
     AttnQ,
     AttnV,
@@ -121,19 +122,8 @@ struct LlamaBlock<
     attn_score: Tensor2Mut<'a, T>,
 }
 
-impl<
-        'a,
-        T: Float<T>,
-        AttnK,
-        AttnQ,
-        AttnV,
-        AttnNorm,
-        FfnDown,
-        FfnGate,
-        FfnNorm,
-        FfnUp,
-        AttnOutput,
-    > LlamaBlock<'a, T, AttnK, AttnQ, AttnV, AttnNorm, FfnDown, FfnGate, FfnNorm, FfnUp, AttnOutput>
+impl<'a, T: Float, AttnK, AttnQ, AttnV, AttnNorm, FfnDown, FfnGate, FfnNorm, FfnUp, AttnOutput>
+    LlamaBlock<'a, T, AttnK, AttnQ, AttnV, AttnNorm, FfnDown, FfnGate, FfnNorm, FfnUp, AttnOutput>
 where
     AttnQ: TensorTypes<T, 2>,
     Tensor<'a, T, 2, AttnQ>: TReader<T, 2>,
@@ -262,9 +252,9 @@ where
                 let freq = T::one()
                     / T::powf(
                         self.params.rope_freq_base,
-                        T::from_usize(j) / T::from_usize(attn_head_size),
+                        T::from(j).unwrap() / T::from(attn_head_size).unwrap(),
                     );
-                let val = T::from_usize(pos) * freq;
+                let val = T::from(pos).unwrap() * freq;
                 let fcr = T::cos(val);
                 let fci = T::sin(val);
                 let q0 = q[i * attn_head_size + j];
@@ -291,7 +281,7 @@ where
                 for i in 0..attn_head_size {
                     score = score + q[q_offset + i] * k[k_offset + i];
                 }
-                score = score / T::sqrt(T::from_usize(attn_head_size));
+                score = score / T::sqrt(T::from(attn_head_size).unwrap());
                 attn_score[t] = score;
             }
 
@@ -353,7 +343,7 @@ fn conv_err(b: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::
 
 impl<
         'a,
-        T: Float<T>,
+        T: Float,
         TokenEmbd,
         Output,
         OutputNorm,
@@ -449,11 +439,12 @@ where
             feed_forward_length: header_find_usize(header, "llama.feed_forward_length")?,
             attention_head_count,
             attention_head_count_kv,
-            attention_layer_norm_rms_epsilon: T::from_f32(header_find_f32(
+            attention_layer_norm_rms_epsilon: T::from(header_find_f32(
                 header,
                 "llama.attention.layer_norm_rms_epsilon",
-            )?),
-            rope_freq_base: T::from_f32(header_find_f32(header, "llama.rope.freq_base")?),
+            )?)
+            .unwrap(),
+            rope_freq_base: T::from(header_find_f32(header, "llama.rope.freq_base")?).unwrap(),
             _rope_dimension_count: header_find_usize(header, "llama.rope.dimension_count")?,
             vocab_size: header_find_usize(header, "llama.vocab_size")?,
             max_seq_len: 2048, // Where does it come from?
@@ -497,7 +488,7 @@ where
 
 impl<
         'a,
-        T: Float<T>,
+        T: Float,
         TokenEmbd,
         Output,
         OutputNorm,
@@ -576,7 +567,7 @@ where
     OutputNorm: TensorTypes<T, 1>,
     Tensor<'a, T, 1, OutputNorm>: TReader<T, 1>,
     GGUFTensor<()>: Tensorify<'a, T, 1, OutputNorm, &'a ModelFile>,
-{
+{ 
     fn build<'b>(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
         Ok(Llama::new(&model, tokenizer_path)?)
     }
@@ -625,5 +616,22 @@ where
         );
         // Last act: logits
         matmul::<T>(logits, &mut self.output, &mut x2);
+    }
+}
+
+pub fn llama_find_type(model: &ModelFile) -> Result<&str, anyhow::Error> {
+
+    let find = |name| {
+        match model.tensors.get(name) {
+            Some(t) => Ok(t.tensor_type),
+            None => Err(anyhow!("could not find tensor"))
+        }
+    };
+
+    let token_embd = find("token_embd.weight")?;
+    if token_embd == GGMLType::F32 {
+        Ok("F32")
+    } else {
+        Ok("F16")
     }
 }

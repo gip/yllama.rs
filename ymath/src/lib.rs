@@ -1,6 +1,6 @@
-use core::ops::{Add, Div, Mul, Neg, Sub};
 use half::f16;
 use memmap2::Mmap;
+use num_traits::float::Float;
 use rand::distributions::uniform::SampleUniform;
 use rand::Rng;
 use std::fmt::Debug;
@@ -8,95 +8,6 @@ use std::marker::PhantomData;
 use std::ops::Range;
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
-
-// Float type
-pub trait Float<T>:
-    Copy
-    + Add<T, Output = T>
-    + Sub<T, Output = T>
-    + Mul<T, Output = T>
-    + Div<T, Output = T>
-    + Neg<Output = T>
-    + Into<f32>
-    + PartialOrd
-{
-    fn zero() -> T;
-    fn one() -> T;
-    fn from_f32(x: f32) -> T;
-    fn to_f32(self) -> f32;
-    fn from_usize(x: usize) -> T;
-    fn exp(self) -> Self;
-    fn sqrt(self) -> Self;
-    fn cos(self) -> Self;
-    fn sin(self) -> Self;
-    fn powf(self, x: T) -> T;
-}
-
-impl Float<f32> for f32 {
-    fn zero() -> f32 {
-        0.0
-    }
-    fn one() -> f32 {
-        1.0
-    }
-    fn from_f32(x: f32) -> f32 {
-        x
-    }
-    fn to_f32(self) -> f32 {
-        self
-    }
-    fn from_usize(x: usize) -> f32 {
-        x as f32
-    }
-    fn exp(self) -> f32 {
-        f32::exp(self)
-    }
-    fn sqrt(self) -> f32 {
-        f32::sqrt(self)
-    }
-    fn cos(self) -> f32 {
-        f32::cos(self)
-    }
-    fn sin(self) -> f32 {
-        f32::sin(self)
-    }
-    fn powf(self, x: f32) -> f32 {
-        f32::powf(self, x)
-    }
-}
-
-impl Float<f16> for f16 {
-    fn zero() -> f16 {
-        f16::from_f32(0.0)
-    }
-    fn one() -> f16 {
-        f16::from_f32(1.0)
-    }
-    fn from_f32(x: f32) -> f16 {
-        f16::from_f32(x)
-    }
-    fn to_f32(self) -> f32 {
-        self.into()
-    }
-    fn from_usize(x: usize) -> f16 {
-        f16::from_f32(x as f32)
-    }
-    fn exp(self) -> f16 {
-        f16::from_f32(f32::exp(self.to_f32()))
-    }
-    fn sqrt(self) -> f16 {
-        f16::from_f32(f32::sqrt(self.to_f32()))
-    }
-    fn cos(self) -> f16 {
-        f16::from_f32(f32::cos(self.to_f32()))
-    }
-    fn sin(self) -> f16 {
-        f16::from_f32(f32::sin(self.to_f32()))
-    }
-    fn powf(self, x: f16) -> f16 {
-        f16::from_f32(f32::powf(self.to_f32(), x.to_f32()))
-    }
-}
 
 // Tensor traits
 pub trait D<const DIM: usize> {
@@ -175,14 +86,15 @@ impl<'a, T, const DIM: usize> TReader<T, DIM> for Tensor<'a, T, DIM, MmapStore<T
 }
 
 impl<'a, const DIM: usize> TReader<f32, DIM> for Tensor<'a, f32, DIM, MmapStore<f16>>
-where MmapStore<f16>: TensorTypes<f16, DIM> {
+where
+    MmapStore<f16>: TensorTypes<f16, DIM>,
+{
     type Reader<'b> = ([usize; DIM], Vec<f32>) where Self: 'b;
     fn reader<'c>(&'c self) -> Self::Reader<'c> {
         let slice = self.store.1.iter().map(|&value| f32::from(value)).collect();
         (self.shape, slice)
     }
 }
-
 
 impl<'a, T, const DIM: usize> TReader<T, DIM> for Tensor<'a, T, DIM, SubStore<T>> {
     type Reader<'b> = ([usize; DIM], &'b [T]) where Self: 'b;
@@ -302,7 +214,7 @@ where
 pub type Vector<'a, T, U> = Tensor<'a, T, 1, U>;
 pub type VectorMut<'a, T> = TensorMut<'a, T, 1>;
 
-impl<'a, T: Float<T>> VectorMut<'a, T> {
+impl<'a, T: Float> VectorMut<'a, T> {
     pub fn new(i: usize) -> Self {
         let mut vec = vec![T::zero(); i];
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
@@ -331,7 +243,7 @@ impl<'a, T: Float<T>> VectorMut<'a, T> {
 // Tensor2Mut
 pub type Tensor2Mut<'a, T> = TensorMut<'a, T, 2>;
 
-impl<'a, T: Float<T>> Tensor2Mut<'a, T> {
+impl<'a, T: Float> Tensor2Mut<'a, T> {
     pub fn new(i: usize, j: usize) -> Self {
         let mut vec = vec![T::zero(); i * j];
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
@@ -521,9 +433,13 @@ impl<'a, T> Index<usize> for Tensor<'a, T, 1, SubStore<T>> {
     fn index(&self, index: usize) -> &T {
         let reader = self.reader();
         let slice = reader.reading().1;
+        #[cfg(debug_assertions)]
         unsafe {
-            let slice: &'a [T] = std::mem::transmute(slice);
-            slice.get_unchecked(index)
+            std::mem::transmute(slice.get_unchecked(index))
+        }
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            std::mem::transmute(slice.get(index))
         }
     }
 }
@@ -532,7 +448,14 @@ impl<'a, T> Index<usize> for TensorMut<'a, T, 1> {
     type Output = T;
     fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
         let (_, slice) = self.reading();
-        unsafe { slice.get_unchecked(index) }
+        #[cfg(debug_assertions)]
+        unsafe {
+            std::mem::transmute(slice.get_unchecked(index))
+        }
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            std::mem::transmute(slice.get(index))
+        }
     }
 }
 
@@ -540,7 +463,14 @@ impl<'a, T: Copy> IndexMut<usize> for TensorMut<'a, T, 1> {
     // Output defined in Index trait, T
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let (_, slice) = self.writing();
-        unsafe { slice.get_unchecked_mut(index) }
+        #[cfg(debug_assertions)]
+        unsafe {
+            slice.get_unchecked_mut(index)
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            slice.get_mut(index).unwrap() // TODO: check this, why do we need to unwrap?
+        }
     }
 }
 
@@ -604,7 +534,7 @@ impl<'a, T: Copy> Tensor2Mut<'a, T> {
     }
 }
 
-pub fn softmax<T: Copy + Float<T>>(v: &mut impl TWrite<T, 1>, size: usize) {
+pub fn softmax<T: Float>(v: &mut impl TWrite<T, 1>, size: usize) {
     let ([d0], v) = v.writing();
     debug_assert!(size < d0);
     let mut max = v[0];
@@ -624,13 +554,11 @@ pub fn softmax<T: Copy + Float<T>>(v: &mut impl TWrite<T, 1>, size: usize) {
     }
 }
 
-pub unsafe fn matmul<T>(
+pub unsafe fn matmul<T: Float>(
     v1: &mut impl TWriter<T, 1>,
     m0: &mut impl TReader<T, 2>,
     v0: &mut impl TReader<T, 1>,
-) where
-    T: Float<T>,
-{
+) {
     let m0_reader = m0.reader();
     let ([m0d0, m0d1], m0_slice) = m0_reader.reading();
     let v0_reader = v0.reader();
@@ -648,7 +576,7 @@ pub unsafe fn matmul<T>(
     }
 }
 
-pub fn rmsnorm<'a, 'b, T: Float<T>>(
+pub fn rmsnorm<'a, 'b, T: Float>(
     xout: &'a mut impl TWriter<T, 1>,
     xin: &'a mut impl TReader<T, 1>,
     w: &'a mut impl TReader<T, 1>,
@@ -665,17 +593,14 @@ pub fn rmsnorm<'a, 'b, T: Float<T>>(
     for i in 0..size {
         ss = ss + xins[i] * xins[i];
     }
-    ss = ss / T::from_usize(size) + epsilon;
+    ss = ss / T::from(size).unwrap() + epsilon;
     ss = T::one() / ss.sqrt();
     for i in 0..size {
         xouts[i] = ws[i] * (ss * xins[i]);
     }
 }
 
-pub fn acc<'a, T>(x: &'a mut impl TWriter<T, 1>, y: &'a mut impl TReader<T, 1>)
-where
-    T: Copy + Add<T, Output = T> + 'a,
-{
+pub fn acc<'a, T: Float>(x: &'a mut impl TWriter<T, 1>, y: &'a mut impl TReader<T, 1>) {
     let mut x = x.writer();
     let ([xd], xs) = x.writing();
     let y = y.reader();
@@ -686,7 +611,7 @@ where
     }
 }
 
-pub fn cp<'a, T: Copy + 'a>(x: &'a mut impl TWriter<T, 1>, y: &'a mut impl TReader<T, 1>) {
+pub fn cp<'a, T: Float>(x: &'a mut impl TWriter<T, 1>, y: &'a mut impl TReader<T, 1>) {
     let y = y.reader();
     let ([yd], ys) = y.reading();
     let mut x = x.writer();
@@ -699,7 +624,7 @@ pub fn cp<'a, T: Copy + 'a>(x: &'a mut impl TWriter<T, 1>, y: &'a mut impl TRead
 
 pub fn max<'a, T: 'a>(x: &'a mut impl TRead<T, 1>) -> (usize, T)
 where
-    T: PartialOrd + Copy,
+    T: Float,
 {
     let ([size], slice) = x.reading();
     let mut i = 0;

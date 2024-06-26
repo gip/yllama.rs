@@ -1,6 +1,6 @@
 pub use gguf::gguf_file::{
     header_find_f32, header_find_string, header_find_string_array, header_find_usize, GGUFFile,
-    GGUFTensor,
+    GGUFTensor
 };
 use half::f16;
 use memmap2::{Mmap, MmapOptions};
@@ -11,7 +11,8 @@ use std::mem::size_of;
 use std::rc::Rc;
 
 mod gguf;
-use gguf::{read_gguf_file, GGMLType, GGUFHeader};
+use gguf::{read_gguf_file, GGUFHeader};
+pub use gguf::GGMLType;
 use ymath::{MmapStore, Tensor, TensorTypes};
 
 #[derive(Debug)]
