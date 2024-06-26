@@ -5,21 +5,20 @@ pub mod model;
 use anyhow::anyhow;
 use clap::Parser;
 pub use gpt::Gpt;
-pub use llama::Llama;
+use half::f16;
+use llama::Llama;
 use model::LLM;
+use num_traits::float::Float;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::str;
 use yloader::{load_build, load_fast};
-use ymath::{max, VectorMut};
+use ymath::{max, MmapStore, VectorMut};
 
-unsafe fn run<'a, T, M>(
-    mut llm: impl LLM<'a, T, u32, M>,
+unsafe fn run<'a, T: Float, M>(
+    mut llm: impl LLM<'a, T, u32, M> + 'a,
     prompt: &str,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    T: Copy + Default + PartialOrd,
-{
+) -> Result<(), Box<dyn std::error::Error>> {
     let input = prompt;
     let tokens: Vec<u32> = llm.encode(input)?;
     let embed_size = llm.embedding_length();
@@ -29,15 +28,12 @@ where
     let mut next_token = tokens[0];
     let mut chat = vec![];
     for pos in 0..1024 {
-        //for (pos, token) in tokens.iter().enumerate() {
-        //println!("Input {} '{}'", next_token, llm.decode(next_token));
         chat.push(next_token);
         println!("{}", llm.decode(&chat));
         llm.embed(&mut x, next_token, pos);
         llm.forward(&mut x, pos);
-        llm.logits(&mut logits, &x);
-        let (tk, _) = max(&logits);
-        // println!("Predicted {} '{}'", tk, llm.decode(tk as u32));
+        llm.logits(&mut logits, &mut x);
+        let (tk, _) = max(&mut logits);
         if pos + 1 < tokens.len() {
             next_token = tokens[pos + 1];
         } else {
@@ -51,21 +47,36 @@ unsafe fn process(
     path: &str,
     tokenizer_path: &str,
     prompt: &str,
+    _clone: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (arch, name, gguf) = load_fast(path)?;
-    let model = load_build(path, gguf)?;
 
     println!("Architecture == {}", arch);
     println!("Name == '{}'", name);
 
     match arch.as_str() {
         "llama" => {
-            let l: Llama = LLM::build(&model, tokenizer_path)?;
-            run(l, prompt)
+            let model = load_build(path, gguf)?;
+            type A = MmapStore<f32>;
+            type B = MmapStore<f16>;
+            let typ = llama::llama_find_type(&model)?;
+            match typ {
+                "F16" => {
+                    let runnable: Llama<f32, B, B, A, B, B, B, A, B, B, A, B, B> =
+                        LLM::build(&model, tokenizer_path)?;
+                    run(runnable, prompt)
+                }
+                "F32" => {
+                    let runnable: Llama<f32> = LLM::build(&model, tokenizer_path)?;
+                    run(runnable, prompt)
+                }
+                _ => Err(anyhow!("Unknown configuration").into()),
+            }
         }
         "gpt" => {
-            let g: Gpt = LLM::build(&model, tokenizer_path)?;
-            run(g, prompt)
+            let model = load_build(path, gguf)?;
+            let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
+            run(runnable, prompt)
         }
         _ => anyhow::Result::Err(anyhow!("Unsupported architecture"))?,
     }?;
@@ -85,9 +96,12 @@ struct Args {
     prompt: String,
 
     #[arg(short, long, default_value_t = false)]
+    clone: bool,
+
+    #[arg(short, long, default_value_t = false)]
     verbose: bool,
 
-    #[arg(short, long, default_value_t = 0.7)]
+    #[arg(long, default_value_t = 0.7)]
     temp: f32,
 
     #[arg(short, long)]
@@ -104,7 +118,7 @@ fn main() {
 
     let _r: f32 = rng.gen_range(0.0..1.0);
 
-    let result = unsafe { process(&args.file, &args.tokenizer, &args.prompt) };
+    let result = unsafe { process(&args.file, &args.tokenizer, &args.prompt, args.clone) };
 
     match result {
         Err(e) => {

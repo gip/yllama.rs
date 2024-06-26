@@ -3,7 +3,7 @@ use anyhow::*;
 use yloader::*;
 use ymath::*;
 
-type ModelDescription<'a> = ModelFile<GGUFFile<MemLayout<'a, f32>>>;
+type ModelDescription<'a> = ModelFile;
 
 pub struct Gpt {}
 
@@ -29,7 +29,7 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
         unimplemented!()
     }
 
-    fn embed(&self, _x: &mut VectorMut<f32>, _token: u32, _pos: usize) {
+    fn embed(&mut self, _x: &mut VectorMut<f32>, _token: u32, _pos: usize) {
         unimplemented!()
     }
 
@@ -45,7 +45,7 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
         unimplemented!()
     }
 
-    unsafe fn logits(&self, _logits: &mut VectorMut<f32>, _x: &VectorMut<f32>) {
+    unsafe fn logits(&mut self, _logits: &mut VectorMut<f32>, _x: &mut VectorMut<f32>) {
         unimplemented!()
     }
 }
