@@ -1,12 +1,15 @@
 # yllama.rs
 
+Welcome to Y Llama!
+
 ## Y Llama is a weekend project with the following aims
 * Learn transformer internals
 * Learn Rust as this is the author's first project in this language
 * Pure Rust
+* No dynamic dispatch or checks during model execution - correct model statically built
 * Support Llama3
 * Support GGUF file
-* Simple, modular, reusable code
+* Support some form of quantization
 * Naive implementation, leaving optimization as a later act
 
 ## Usage

@@ -1,4 +1,4 @@
-use ymath::*;
+use ymath::tensor::VectorMut;
 
 pub trait LLM<'a, T, TK, M>: Sized {
     fn build(model: &'a M, tokenizer_path: &str) -> Result<Self, anyhow::Error>
