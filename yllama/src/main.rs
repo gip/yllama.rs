@@ -63,15 +63,14 @@ unsafe fn process(
             match typ {
                 "F16" => {
                     let runnable: Llama<f32, B, B, A, B, B, B, A, B, B, A, B, B> =
-                    LLM::build(&model, tokenizer_path)?;
+                        LLM::build(&model, tokenizer_path)?;
                     run(runnable, prompt)
-                },
+                }
                 "F32" => {
-                    let runnable: Llama<f32> =
-                    LLM::build(&model, tokenizer_path)?;
+                    let runnable: Llama<f32> = LLM::build(&model, tokenizer_path)?;
                     run(runnable, prompt)
-                },
-                _ => Err(anyhow!("Unknown configuration").into())
+                }
+                _ => Err(anyhow!("Unknown configuration").into()),
             }
         }
         "gpt" => {

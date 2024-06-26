@@ -567,7 +567,7 @@ where
     OutputNorm: TensorTypes<T, 1>,
     Tensor<'a, T, 1, OutputNorm>: TReader<T, 1>,
     GGUFTensor<()>: Tensorify<'a, T, 1, OutputNorm, &'a ModelFile>,
-{ 
+{
     fn build<'b>(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
         Ok(Llama::new(&model, tokenizer_path)?)
     }
@@ -620,12 +620,9 @@ where
 }
 
 pub fn llama_find_type(model: &ModelFile) -> Result<&str, anyhow::Error> {
-
-    let find = |name| {
-        match model.tensors.get(name) {
-            Some(t) => Ok(t.tensor_type),
-            None => Err(anyhow!("could not find tensor"))
-        }
+    let find = |name| match model.tensors.get(name) {
+        Some(t) => Ok(t.tensor_type),
+        None => Err(anyhow!("could not find tensor")),
     };
 
     let token_embd = find("token_embd.weight")?;
