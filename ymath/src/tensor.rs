@@ -190,19 +190,6 @@ impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)>
     }
 }
 
-// // TODO -> abstract with Rowable trait?
-// impl<'a, T: Copy, const D0: usize, const D1: usize> TensorMut<'a, T, MATRIX<D0, D1>> {
-//     pub fn row(&mut self, i: usize) -> VectorMut<T, D1> {
-//         let slice = self.writing();
-//         debug_assert!(i < D0);
-//         VectorMut {
-//             phantom: PhantomData,
-//             vec: None,
-//             slice: &mut slice[i * D1..(i + 1) * D1],
-//         }
-//     }
-// }
-
 impl<'a, T: Copy, const D0: usize, const D1: usize> RowableMut<T, D0>
     for TensorMut<'a, T, MATRIX<D0, D1>>
 {
@@ -268,15 +255,6 @@ impl<SHAPE: Tensor> TensorTypes<f32, SHAPE> for MmapStore<f32, f16, false> {
     type ReaderType<'a> = &'a [f16];
     type WriterType<'a> = &'a mut [f16];
 }
-
-// impl<'a, const DIM: usize> TReader<f32, DIM> for Tensor<'a, f32, DIM, MmapStore<f32, f16, false>>
-// {
-//     type Reader<'b> = ([usize; DIM], Vec<f32>) where Self: 'b;
-//     fn reader<'c>(&'c self) -> Self::Reader<'c> {
-//         let slice = self.store.1.iter().map(|&value| f32::from(value)).collect();
-//         (self.shape, slice)
-//     }
-// }
 
 impl<'a, const D0: usize, const D1: usize> Rowable<f32, D0>
     for TensorImm<'a, f32, MATRIX<D0, D1>, MmapStore<f32, f32>>
