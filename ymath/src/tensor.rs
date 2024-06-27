@@ -62,7 +62,7 @@ pub trait TRead<T, SHAPE: Tensor> {
     fn reading(&self) -> &[T];
 }
 
-pub trait TWriter<T: Copy, SHAPE: Tensor> {
+pub trait TWriter<T: Copy, SHAPE: Tensor>: TReader<T, SHAPE> {
     type Writer<'b>: TWrite<T, SHAPE>
     where
         Self: 'b;
@@ -190,16 +190,30 @@ impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)>
     }
 }
 
-// TODO -> abstract with Rowable trait?
-impl<'a, T: Copy, const D0: usize, const D1: usize> TensorMut<'a, T, MATRIX<D0, D1>> {
-    pub fn row(&mut self, i: usize) -> VectorMut<T, D1> {
-        let slice = self.writing();
-        debug_assert!(i < D0);
-        VectorMut {
+// // TODO -> abstract with Rowable trait?
+// impl<'a, T: Copy, const D0: usize, const D1: usize> TensorMut<'a, T, MATRIX<D0, D1>> {
+//     pub fn row(&mut self, i: usize) -> VectorMut<T, D1> {
+//         let slice = self.writing();
+//         debug_assert!(i < D0);
+//         VectorMut {
+//             phantom: PhantomData,
+//             vec: None,
+//             slice: &mut slice[i * D1..(i + 1) * D1],
+//         }
+//     }
+// }
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> RowableMut<T, D0>
+    for TensorMut<'a, T, MATRIX<D0, D1>>
+{
+    fn row(&mut self, i: usize) -> TensorMut<T, VECTOR<D0>> {
+        debug_assert!(i < D1);
+        let v: VectorMut<T, D0> = VectorMut {
             phantom: PhantomData,
             vec: None,
-            slice: &mut slice[i * D1..(i + 1) * D1],
-        }
+            slice: &mut self.slice[i * D0..(i + 1) * D0],
+        };
+        v
     }
 }
 
@@ -341,6 +355,18 @@ impl<'a, T, SHAPE: Tensor, F> TReader<T, SHAPE> for TensorImm<'a, T, SHAPE, VecS
     }
 }
 
+impl<'a, const D0: usize, const D1: usize> Rowable<f32, D0>
+    for TensorImm<'a, f32, MATRIX<D0, D1>, VecStore<f32, f16>>
+{
+    fn row(&self, i: usize) -> impl TReader<f32, VECTOR<D0>> {
+        debug_assert!(i < D1);
+        let v: VectorImm<f32, D0, SubStore<f32>> = VectorImm {
+            store: &self.store[i * D0..(i + 1) * D0],
+        };
+        v
+    }
+}
+
 // TRead //////////////////////////////////////////////////////////////////////
 impl<'a, 'b, T, SHAPE: Tensor> TRead<T, SHAPE> for &'b [T] {
     fn reading(&self) -> &[T] {
@@ -364,4 +390,8 @@ impl<'a: 'b, 'b, T: Copy, SHAPE: Tensor> TWrite<T, SHAPE> for &'b mut [T] {
 //
 pub trait Rowable<T, const D0: usize> {
     fn row(&self, i: usize) -> impl TReader<T, V<D0>>;
+}
+
+pub trait RowableMut<T: Copy, const D0: usize> {
+    fn row(&mut self, i: usize) -> TensorMut<T, VECTOR<D0>>;
 }

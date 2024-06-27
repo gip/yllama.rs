@@ -58,12 +58,12 @@ unsafe fn process(
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
             type B = MmapStore<f32, f16>;
-            // type C = VecStore<f32, f16>;
+            type C = VecStore<f32, f16>;
             type D = VecStore<f32, f32>;
             let typ = llama::llama_find_type(&model)?;
             match typ {
                 "F16" => {
-                    let runnable: Llama<f32, B, B, A, B, B, B, D, B, B, A, B, B> =
+                    let runnable: Llama<f32, C, B, A, B, B, B, D, B, B, A, B, B> =
                         LLM::build(&model, tokenizer_path)?;
                     run(runnable, prompt)
                 }

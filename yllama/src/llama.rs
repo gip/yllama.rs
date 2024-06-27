@@ -132,9 +132,9 @@ struct LlamaBlock<
     hb: VectorMut<'a, T, FF>,
     hb2: VectorMut<'a, T, FF>,
     q: VectorMut<'a, T, EMBED>,
-    k_cache: Tensor2Mut<'a, T, 2048, KV>, // Check - is it KV length
-    v_cache: Tensor2Mut<'a, T, 2048, KV>,
-    attn_score: Tensor2Mut<'a, T, 32, 2048>,
+    k_cache: Tensor2Mut<'a, T, KV, EMBED>,
+    v_cache: Tensor2Mut<'a, T, KV, EMBED>,
+    attn_score: Tensor2Mut<'a, T, 32, KV>,
 }
 
 impl<
