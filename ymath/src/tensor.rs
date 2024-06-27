@@ -7,30 +7,32 @@ pub trait Tensor {
     fn dim() -> usize;
 }
 
-trait Matrix: Tensor {}
-trait Vector: Tensor {}
+pub trait Matrix: Tensor {}
+pub trait Vector: Tensor {}
 
 pub struct VECTOR<const D0: usize> {}
 pub type V<const D0: usize> = VECTOR<D0>;
-
 impl<const D0: usize> Tensor for VECTOR<D0> {
     fn n_elem() -> usize {
         D0
     }
-    fn dim() -> usize { 1 }
+    fn dim() -> usize {
+        1
+    }
 }
 impl<const D0: usize> Vector for VECTOR<D0> {}
 
 pub struct MATRIX<const D0: usize, const D1: usize> {}
 pub type M<const D0: usize, const D1: usize> = MATRIX<D0, D1>;
-impl<const D0:usize, const D1: usize> Tensor for MATRIX<D0, D1> {
+impl<const D0: usize, const D1: usize> Tensor for MATRIX<D0, D1> {
     fn n_elem() -> usize {
         D0 * D1
     }
-    fn dim() -> usize { 2 }
+    fn dim() -> usize {
+        2
+    }
 }
 impl<const D0: usize, const D1: usize> Vector for MATRIX<D0, D1> {}
-
 
 // Tensor /////////////////////////////////////////////////////////////////////
 // pub trait D<const DIM: usize> {
@@ -78,8 +80,8 @@ pub struct TensorMut<'a, T, SHAPE> {
     pub slice: &'a mut [T],
 }
 
-pub type VectorMut<'a, T, SHAPE: Vector> = TensorMut<'a, T, SHAPE>;
-pub type Tensor2Mut<'a, T, SHAPE: Matrix> = TensorMut<'a, T, SHAPE>;
+pub type VectorMut<'a, T, const D0: usize> = TensorMut<'a, T, VECTOR<D0>>;
+pub type Tensor2Mut<'a, T, const D0: usize, const D1: usize> = TensorMut<'a, T, MATRIX<D0, D1>>;
 
 // impl<'a, T, const DIM: usize> D<DIM> for TensorMut<'a, T, DIM> {
 //     fn shape(&self) -> [usize; DIM] {
@@ -113,9 +115,9 @@ impl<'a, T: Copy, SHAPE: Tensor> TWrite<T, SHAPE> for TensorMut<'a, T, SHAPE> {
     }
 }
 
-impl<'a, T: Float, SHAPE: Vector> VectorMut<'a, T, SHAPE> {
-    pub fn new(i: usize) -> Self {
-        let mut vec = vec![T::zero(); i];
+impl<'a, T: Float, const D0: usize> VectorMut<'a, T, D0> {
+    pub fn new() -> Self {
+        let mut vec = vec![T::zero(); D0];
         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
         VectorMut {
             phantom: PhantomData,
@@ -123,33 +125,19 @@ impl<'a, T: Float, SHAPE: Vector> VectorMut<'a, T, SHAPE> {
             slice,
         }
     }
-
-    // pub fn new_from(y: &'a mut Vector<'a, T, SubStore<T>>) -> Self {
-    //     let ([size], y_slice) = y.reader();
-    //     let mut vec = vec![T::zero(); size];
-    //     let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
-    //     for i in 0..size {
-    //         vec[i] = y_slice[i];
-    //     }
-    //     VectorMut {
-    //         shape: [size],
-    //         vec: Some(vec),
-    //         slice,
-    //     }
-    // }
 }
 
-// impl<'a, T: Float> Tensor2Mut<'a, T> {
-//     pub fn new(i: usize, j: usize) -> Self {
-//         let mut vec = vec![T::zero(); i * j];
-//         let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
-//         Tensor2Mut {
-//             shape: [i, j],
-//             vec: Some(vec),
-//             slice,
-//         }
-//     }
-// }
+impl<'a, T: Float, const D0: usize, const D1: usize> Tensor2Mut<'a, T, D0, D1> {
+    pub fn new() -> Self {
+        let mut vec = vec![T::zero(); D0 * D1];
+        let slice: &'a mut [T] = unsafe { std::mem::transmute(vec.as_mut_slice()) };
+        TensorMut {
+            phantom: PhantomData,
+            vec: Some(vec),
+            slice,
+        }
+    }
+}
 
 impl<'a, T, SHAPE: Vector> Index<usize> for TensorMut<'a, T, SHAPE> {
     type Output = T;
@@ -181,7 +169,9 @@ impl<'a, T: Copy, SHAPE: Vector> IndexMut<usize> for TensorMut<'a, T, SHAPE> {
     }
 }
 
-impl<'a, T, const D0: usize, const D1: usize> Index<(usize, usize)> for TensorMut<'a, T, MATRIX<D0, D1>> {
+impl<'a, T, const D0: usize, const D1: usize> Index<(usize, usize)>
+    for TensorMut<'a, T, MATRIX<D0, D1>>
+{
     type Output = T;
     fn index(&self, (i, j): (usize, usize)) -> &Self::Output {
         debug_assert!(i < D1 && j < D0);
@@ -189,7 +179,9 @@ impl<'a, T, const D0: usize, const D1: usize> Index<(usize, usize)> for TensorMu
     }
 }
 
-impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)> for TensorMut<'a, T, MATRIX<D0, D1>> {
+impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)>
+    for TensorMut<'a, T, MATRIX<D0, D1>>
+{
     // Output defined in Index trait, T
     fn index_mut(&mut self, (i, j): (usize, usize)) -> &mut Self::Output {
         debug_assert!(i < D1 && j < D0);
@@ -200,7 +192,7 @@ impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)> for Tenso
 
 // TODO -> abstract with Rowable trait?
 impl<'a, T: Copy, const D0: usize, const D1: usize> TensorMut<'a, T, MATRIX<D0, D1>> {
-    pub fn row(&mut self, i: usize) -> VectorMut<T, VECTOR<D1>> {
+    pub fn row(&mut self, i: usize) -> VectorMut<T, D1> {
         let slice = self.writing();
         debug_assert!(i < D0);
         VectorMut {
@@ -216,8 +208,9 @@ pub struct TensorImm<'a, T: 'a, SHAPE: Tensor, U: TensorTypes<T, SHAPE>> {
     pub store: U::StoreType<'a>,
 }
 
-pub type VectorImm<'a, T, SHAPE: Vector, U> = TensorImm<'a, T, SHAPE, U>;
-pub type Tensor2Imm<'a, T, SHAPE: Matrix, U> = TensorImm<'a, T, SHAPE, U>;
+pub type VectorImm<'a, T, const D0: usize, U> = TensorImm<'a, T, VECTOR<D0>, U>;
+pub type Tensor2Imm<'a, T, const D0: usize, const D1: usize, U> =
+    TensorImm<'a, T, MATRIX<D0, D1>, U>;
 
 // MmapStore //////////////////////////////////////////////////////////////////
 pub struct MmapStore<T, U, const CP: bool = true> {
@@ -246,7 +239,9 @@ impl<SHAPE: Tensor> TensorTypes<f32, SHAPE> for MmapStore<f32, f16, true> {
     type WriterType<'a> = &'a mut [f16];
 }
 
-impl<'a, SHAPE: Tensor> TReader<f32, SHAPE> for TensorImm<'a, f32, SHAPE, MmapStore<f32, f16, true>> {
+impl<'a, SHAPE: Tensor> TReader<f32, SHAPE>
+    for TensorImm<'a, f32, SHAPE, MmapStore<f32, f16, true>>
+{
     type Reader<'b> = Vec<f32> where Self: 'b;
     fn reader<'c>(&'c self) -> Self::Reader<'c> {
         self.store.1.iter().map(|&value| f32::from(value)).collect()
@@ -269,20 +264,24 @@ impl<SHAPE: Tensor> TensorTypes<f32, SHAPE> for MmapStore<f32, f16, false> {
 //     }
 // }
 
-impl<'a, const D0: usize, const D1: usize> Rowable<'a, f32, VECTOR<D0>, MmapStore<f32, f32>> for TensorImm<'a, f32, MATRIX<D0, D1>, MmapStore<f32, f32>> {
+impl<'a, const D0: usize, const D1: usize> Rowable<f32, D0>
+    for TensorImm<'a, f32, MATRIX<D0, D1>, MmapStore<f32, f32>>
+{
     fn row(&self, i: usize) -> impl TReader<f32, VECTOR<D0>> {
         debug_assert!(i < D1);
-        let v: VectorImm<'a, f32, VECTOR<D0>, MmapStore<f32, f32>> = VectorImm {
+        let v: VectorImm<'a, f32, D0, MmapStore<f32, f32>> = VectorImm {
             store: (self.store.0.clone(), &self.store.1[i * D0..(i + 1) * D0]),
         };
         v
     }
 }
 
-impl<'a, const D0: usize, const D1: usize> Rowable<'a, f32, VECTOR<D0>, MmapStore<f32, f16>> for TensorImm<'a, f32, MATRIX<D0, D1>, MmapStore<f32, f16>> {
+impl<'a, const D0: usize, const D1: usize> Rowable<f32, D0>
+    for TensorImm<'a, f32, MATRIX<D0, D1>, MmapStore<f32, f16>>
+{
     fn row(&self, i: usize) -> impl TReader<f32, VECTOR<D0>> {
         debug_assert!(i < D1);
-        let v: VectorImm<'a, f32, VECTOR<D0>, MmapStore<f32, f16>> = VectorImm {
+        let v: VectorImm<'a, f32, D0, MmapStore<f32, f16>> = VectorImm {
             store: (self.store.0.clone(), &self.store.1[i * D0..(i + 1) * D0]),
         };
         v
@@ -357,15 +356,12 @@ impl<'a, 'b, T, SHAPE: Tensor> TRead<T, SHAPE> for Vec<T> {
 
 // TWrite /////////////////////////////////////////////////////////////////////
 impl<'a: 'b, 'b, T: Copy, SHAPE: Tensor> TWrite<T, SHAPE> for &'b mut [T] {
-    fn writing(&mut self) ->  &mut [T] {
+    fn writing(&mut self) -> &mut [T] {
         self
     }
 }
 
 //
-pub trait Rowable<'a, T, SHAPE: Vector, U>
-where
-    U: TensorTypes<T, SHAPE>,
-{
-    fn row(&self, i: usize) -> impl TReader<T, SHAPE>;
+pub trait Rowable<T, const D0: usize> {
+    fn row(&self, i: usize) -> impl TReader<T, V<D0>>;
 }

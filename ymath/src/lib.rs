@@ -214,7 +214,10 @@ pub fn rmsnorm<'a, 'b, T: Float, const D0: usize>(
 }
 
 //
-pub fn acc<'a, T: Float, const D0: usize>(x: &'a mut impl TWriter<T, VECTOR<D0>>, y: &'a impl TReader<T, VECTOR<D0>>) {
+pub fn acc<'a, T: Float, const D0: usize>(
+    x: &'a mut impl TWriter<T, VECTOR<D0>>,
+    y: &'a impl TReader<T, VECTOR<D0>>,
+) {
     let mut x = x.writer();
     let xs = x.writing();
     let y = y.reader();
@@ -224,7 +227,10 @@ pub fn acc<'a, T: Float, const D0: usize>(x: &'a mut impl TWriter<T, VECTOR<D0>>
     }
 }
 
-pub fn cp<'a, T: Float, const D0: usize>(x: &'a mut impl TWriter<T, VECTOR<D0>>, y: &'a impl TReader<T, VECTOR<D0>>) {
+pub fn cp<'a, T: Float, const D0: usize>(
+    x: &'a mut impl TWriter<T, VECTOR<D0>>,
+    y: &'a impl TReader<T, VECTOR<D0>>,
+) {
     let y = y.reader();
     let ys = y.reading();
     let mut x = x.writer();
