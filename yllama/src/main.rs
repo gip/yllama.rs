@@ -16,16 +16,14 @@ use yloader::{load_build, load_fast};
 use ymath::function::max;
 use ymath::tensor::{MmapStore, VecStore, VectorMut};
 
-unsafe fn run<'a, T: Float, M>(
-    mut llm: impl LLM<'a, T, u32, M> + 'a,
+unsafe fn run<'a, T: Float, M, const EMBED: usize, const VOCAB: usize>(
+    mut llm: impl LLM<'a, T, u32, M, EMBED, VOCAB> + 'a,
     prompt: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let input = prompt;
     let tokens: Vec<u32> = llm.encode(input)?;
-    let embed_size = llm.embedding_length();
-    let vocab_size = llm.vocab_size();
-    let mut logits = VectorMut::new(vocab_size);
-    let mut x: VectorMut<T> = VectorMut::new(embed_size);
+    let mut logits: VectorMut<T, VOCAB> = VectorMut::new();
+    let mut x: VectorMut<T, EMBED> = VectorMut::new();
     let mut next_token = tokens[0];
     let mut chat = vec![];
     for pos in 0..1024 {
@@ -60,12 +58,12 @@ unsafe fn process(
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
             type B = MmapStore<f32, f16>;
-            // type C = VecStore<f32, f16>;
+            type C = VecStore<f32, f16>;
             type D = VecStore<f32, f32>;
             let typ = llama::llama_find_type(&model)?;
             match typ {
                 "F16" => {
-                    let runnable: Llama<f32, B, B, A, B, B, B, D, B, B, A, B, B> =
+                    let runnable: Llama<f32, C, B, A, B, B, B, D, B, B, A, B, B> =
                         LLM::build(&model, tokenizer_path)?;
                     run(runnable, prompt)
                 }
@@ -76,11 +74,11 @@ unsafe fn process(
                 _ => Err(anyhow!("Unknown configuration").into()),
             }
         }
-        "gpt" => {
-            let model = load_build(path, gguf)?;
-            let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
-            run(runnable, prompt)
-        }
+        // "gpt" => {
+        //     let model = load_build(path, gguf)?;
+        //     let runnable: Gpt = LLM::build(&model, tokenizer_path)?;
+        //     run(runnable, prompt)
+        // }
         _ => anyhow::Result::Err(anyhow!("Unsupported architecture"))?,
     }?;
     Ok(())

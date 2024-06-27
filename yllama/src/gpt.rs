@@ -7,7 +7,9 @@ type ModelDescription<'a> = ModelFile;
 
 pub struct Gpt {}
 
-impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
+impl<'a, const EMBED: usize, const VOCAB: usize>
+    LLM<'a, f32, u32, ModelDescription<'a>, EMBED, VOCAB> for Gpt
+{
     fn build<'b>(
         _model: &'a ModelDescription,
         _tokenizer_path: &str,
@@ -15,12 +17,6 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
         unimplemented!()
     }
 
-    fn embedding_length(&self) -> usize {
-        unimplemented!()
-    }
-    fn vocab_size(&self) -> usize {
-        unimplemented!()
-    }
     fn block_count(&self) -> usize {
         unimplemented!()
     }
@@ -29,7 +25,7 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
         unimplemented!()
     }
 
-    fn embed(&mut self, _x: &mut VectorMut<f32>, _token: u32, _pos: usize) {
+    fn embed(&mut self, _x: &mut VectorMut<f32, EMBED>, _token: u32, _pos: usize) {
         unimplemented!()
     }
 
@@ -37,15 +33,19 @@ impl<'a> LLM<'a, f32, u32, ModelDescription<'a>> for Gpt {
         unimplemented!()
     }
 
-    unsafe fn forward(&mut self, _x: &mut VectorMut<f32>, _pos: usize) {
+    unsafe fn forward(&mut self, _x: &mut VectorMut<f32, EMBED>, _pos: usize) {
         unimplemented!()
     }
 
-    unsafe fn block_forward(&mut self, _x: &mut VectorMut<f32>, _pos: usize, _block: usize) {
+    unsafe fn block_forward(&mut self, _x: &mut VectorMut<f32, EMBED>, _pos: usize, _block: usize) {
         unimplemented!()
     }
 
-    unsafe fn logits(&mut self, _logits: &mut VectorMut<f32>, _x: &mut VectorMut<f32>) {
+    unsafe fn logits(
+        &mut self,
+        _logits: &mut VectorMut<f32, VOCAB>,
+        _x: &mut VectorMut<f32, EMBED>,
+    ) {
         unimplemented!()
     }
 }
