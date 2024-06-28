@@ -89,29 +89,6 @@ impl<'a, T: Copy, SHAPE: IsTensor> TWriter<T, SHAPE> for TensorMut<'a, T, SHAPE>
     }
 }
 
-impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for TensorMut<'a, T, SHAPE, SubStore<T, false>> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader(&self) -> &[T] {
-        self.store
-    }
-}
-
-impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for TensorMut<'a, T, SHAPE, SubStore<T, true>> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader(&self) -> &[T] {
-        self.store
-    }
-}
-
-impl<'a, T: Copy, SHAPE: IsTensor> TWriter<T, SHAPE>
-    for TensorMut<'a, T, SHAPE, SubStore<T, true>>
-{
-    type Writer<'b> = &'b mut [T] where Self: 'b;
-    fn writer(&mut self) -> &mut [T] {
-        self.store
-    }
-}
-
 impl<'a, T: Float, const D0: usize> VectorMut<'a, T, D0> {
     pub fn new() -> Self {
         let vec = vec![T::zero(); D0];
@@ -229,15 +206,19 @@ impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)>
     }
 }
 
-impl<'a, T: Copy + Sized, const D0: usize, const D1: usize> RowableMut<T, D0>
-    for TensorMut<'a, T, MATRIX<D0, D1>>
+impl<'a, T, const D0: usize, const D1: usize> RowableMut<T, D0, D1, VecStore<T>>
+    for Tensor<'a, true, T, MATRIX<D0, D1>, VecStore<T>>
+where
+    T: 'a,
 {
-    fn row(&mut self, i: usize) -> TensorMut<T, VECTOR<D0>, SubStore<T, true>> {
+    type RowStoreType = SubStore<T>;
+    type RowTensorType<'b> = Tensor<'b, true, T, VECTOR<D0>, SubStore<T, true>> where Self: 'b;
+
+    fn row<'b>(&'b mut self, i: usize) -> Self::RowTensorType<'b> {
         debug_assert!(i < D1);
-        let v: TensorMut<T, VECTOR<D0>, SubStore<T, true>> = Tensor {
+        Tensor {
             store: &mut self.store[i * D0..(i + 1) * D0],
-        };
-        v
+        }
     }
 }
 
@@ -309,20 +290,6 @@ where
     }
 }
 
-// impl<'a, const D0: usize, const D1: usize> Rowable<'a, f32, D0, D1, MmapStore<f32, f16>>
-//     for Tensor<'a, false, f32, MATRIX<D0, D1>, MmapStore<f32, f16>>
-// {
-//     type RowStoreType = MmapStore<f32, f16>;
-//     type RowTensorType = Tensor<'a, false, f32, VECTOR<D0>, MmapStore<f32, f16>>;
-//     fn row(&self, i: usize) -> Tensor<false, f32, VECTOR<D0>, MmapStore<f32, f16>> {
-//         debug_assert!(i < D1);
-//         let v: VectorImm<f32, D0, MmapStore<f32, f16>> = VectorImm {
-//             store: (self.store.0.clone(), &self.store.1[i * D0..(i + 1) * D0]),
-//         };
-//         v
-//     }
-// }
-
 impl<'a, T, SHAPE: IsVector + 'a, U> Index<usize> for Tensor<'a, false, T, SHAPE, MmapStore<T, U>>
 where
     MmapStore<T, U>: TensorTypes<T, SHAPE>,
@@ -343,21 +310,6 @@ where
     }
 }
 
-// impl<'a, T, SHAPE: IsVector + 'a> IndexMut<usize> for Tensor<'a, false, T, SHAPE, MmapStore<T, T>> {
-//     fn index_mut(&mut self, index: usize) -> &mut T {
-//         let mut reader = self.reader();
-//         let slice = <&[T] as tensor::TRead<T>>::reading(&reader);
-//         #[cfg(debug_assertions)]
-//         unsafe {
-//             slice.get_unchecked(index)
-//         }
-//         #[cfg(not(debug_assertions))]
-//         unsafe {
-//             std::mem::transmute(slice.get(index))
-//         }
-//     }
-// }
-
 // SubStore ///////////////////////////////////////////////////////////////////
 pub struct SubStore<U, const RW: bool = false> {
     phantom: PhantomData<U>,
@@ -375,9 +327,46 @@ impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for SubStore<T, true> {
     type WriterType<'a> = &'a mut [T] where T: 'a;
 }
 
-impl<'a, T, SHAPE: IsTensor + 'a> TReader<T, SHAPE> for Tensor<'a, false, T, SHAPE, SubStore<T>> {
+impl<'a, T, SHAPE: IsTensor + 'a> TReader<T, SHAPE> for Tensor<'a, false, T, SHAPE, SubStore<T, false>> {
     type Reader<'b> = &'b [T] where Self: 'b;
     fn reader(&self) -> Self::Reader<'_> {
+        self.store
+    }
+}
+
+// impl<'a, T, SHAPE: IsTensor + 'a> TReader<T, SHAPE> for Tensor<'a, true, T, SHAPE, SubStore<T, true>> {
+//     type Reader<'b> = &'b [T] where Self: 'b;
+//     fn reader(&self) -> Self::Reader<'_> {
+//         self.store
+//     }
+// }
+
+// impl<'a, T: Copy, SHAPE: IsTensor + 'a> TWriter<T, SHAPE> for Tensor<'a, true, T, SHAPE, SubStore<T, true>> {
+//     type Writer<'b> = &'b mut [T] where Self: 'b;
+//     fn writer(&mut self) -> Self::Writer<'_> {
+//         self.store
+//     }
+// }
+
+impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for TensorMut<'a, T, SHAPE, SubStore<T, false>> {
+    type Reader<'b> = &'b [T] where Self: 'b;
+    fn reader(&self) -> &[T] {
+        self.store
+    }
+}
+
+impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for TensorMut<'a, T, SHAPE, SubStore<T, true>> {
+    type Reader<'b> = &'b [T] where Self: 'b;
+    fn reader(&self) -> &[T] {
+        self.store
+    }
+}
+
+impl<'a, T: Copy, SHAPE: IsTensor> TWriter<T, SHAPE>
+    for TensorMut<'a, T, SHAPE, SubStore<T, true>>
+{
+    type Writer<'b> = &'b mut [T] where Self: 'b;
+    fn writer(&mut self) -> &mut [T] {
         self.store
     }
 }
@@ -460,7 +449,10 @@ pub trait Rowable<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D
         Self: 'a;
     fn row<'a>(&'a self, i: usize) -> Self::RowTensorType<'a>;
 }
-
-pub trait RowableMut<T: Copy, const D0: usize> {
-    fn row(&mut self, i: usize) -> TensorMut<T, VECTOR<D0>, SubStore<T, true>>;
+pub trait RowableMut<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
+    type RowStoreType: TensorTypes<T, V<D0>>;
+    type RowTensorType<'a>: TReader<T, V<D0>>
+    where
+        Self: 'a;
+    fn row<'a>(&'a mut self, i: usize) -> Self::RowTensorType<'a>;
 }

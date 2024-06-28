@@ -213,6 +213,7 @@ where
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
     Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
+
 {
     fn new(model: &'a ModelFile, i: usize, params: LlamaParams<T>) -> Result<Self, anyhow::Error> {
         macro_rules! build_tensor {
