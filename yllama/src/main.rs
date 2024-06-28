@@ -1,7 +1,7 @@
 pub mod gpt;
 pub mod llama;
 pub use gpt::Gpt;
-pub mod model;
+pub mod llm;
 
 use std::str;
 use anyhow::anyhow;
@@ -10,7 +10,7 @@ use half::f16;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use model::LLM;
+use llm::LLM;
 use llama::Llama;
 use yloader::{load_build, load_fast};
 use ymath::tensor::{MmapStore, VecStore};

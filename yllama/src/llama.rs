@@ -1,4 +1,4 @@
-use crate::model::LLM;
+use crate::llm::LLM;
 use anyhow::anyhow;
 use num_traits::float::Float;
 use tokenizers::tokenizer::Tokenizer;

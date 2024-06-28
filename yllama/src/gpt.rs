@@ -1,4 +1,4 @@
-use crate::model::LLM;
+use crate::llm::LLM;
 use anyhow::*;
 use yloader::*;
 use ymath::tensor::*;
