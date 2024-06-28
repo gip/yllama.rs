@@ -150,8 +150,9 @@ pub fn dequantize_row_q6_k(x: &[BlockQ6K], y: &mut Vec<f32>, k: usize) -> usize 
     ycount
 }
 
-pub fn softmax<T: Float, const D0: usize>(v: &mut impl TWrite<T, VECTOR<D0>>, size: usize) {
-    let v = v.writing();
+pub fn softmax<T: Float, const D0: usize>(v: &mut impl TWriter<T, VECTOR<D0>>, size: usize) {
+    let mut writer = v.writer();
+    let v = writer.writing();
     debug_assert!(size < D0);
     let mut max = v[0];
     for i in 1..size {

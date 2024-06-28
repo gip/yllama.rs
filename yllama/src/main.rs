@@ -3,15 +3,15 @@ pub mod llama;
 pub use gpt::Gpt;
 pub mod llm;
 
-use std::str;
 use anyhow::anyhow;
 use clap::Parser;
 use half::f16;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::str;
 
-use llm::LLM;
 use llama::Llama;
+use llm::LLM;
 use yloader::{load_build, load_fast};
 use ymath::tensor::{MmapStore, VecStore};
 
@@ -31,15 +31,14 @@ unsafe fn process(
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
             type B = MmapStore<f32, f16>;
-            type C = VecStore<f32, f16>;
-            type D = VecStore<f32, f32>;
+            type C = VecStore<f32>;
+            type D = VecStore<f32>;
             let typ = llama::llama_find_type(&model)?;
             // This is UGLY - TODO: improve on it!
             match typ {
                 "F16" => {
                     type LlamaType<'a> = Llama<'a, f32, C, B, A, B, B, B, D, B, B, A, B, B>;
-                    let mut runnable: LlamaType =
-                        LLM::build(&model, tokenizer_path)?;
+                    let mut runnable: LlamaType = LLM::build(&model, tokenizer_path)?;
                     runnable.run(prompt)
                 }
                 "F32" => {

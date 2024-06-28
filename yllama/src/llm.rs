@@ -1,19 +1,18 @@
+use num_traits::float::Float;
 use std::convert::TryInto;
 use std::fmt::Debug;
-use num_traits::float::Float;
-use ymath::tensor::VectorMut;
 use ymath::function::max;
+use ymath::tensor::VectorMut;
 
-pub trait Initializable<MODE, M> {
-    fn initialize(model: &M) -> Self;
+pub trait Initializable<D> {
+    fn initialize(description: &D, name: &str) -> Self;
 }
 
-pub trait LLM<'a, T: Float, TK: Copy, M, const EMBED: usize, const VOCAB: usize>: Sized 
+pub trait LLM<'a, T: Float, TK: Copy, M, const EMBED: usize, const VOCAB: usize>: Sized
 where
     usize: TryInto<TK>,
-    <usize as TryInto<TK>>::Error: Debug
+    <usize as TryInto<TK>>::Error: Debug,
 {
-
     fn build(model: &'a M, tokenizer_path: &str) -> Result<Self, anyhow::Error>
     where
         Self: Sized;
@@ -28,10 +27,7 @@ where
 
     unsafe fn block_forward(&mut self, x: &mut VectorMut<T, EMBED>, pos: usize, block: usize);
 
-    unsafe fn run(
-        &mut self,
-        prompt: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    unsafe fn run(&mut self, prompt: &str) -> Result<(), Box<dyn std::error::Error>> {
         let input = prompt;
         let tokens: Vec<TK> = self.encode(input)?;
         let mut logits: VectorMut<T, VOCAB> = VectorMut::new();
