@@ -84,7 +84,6 @@ macro_rules! impl_tensorify_for_mmapstore_f32 {
         }
     };
 }
-
 impl_tensorify_for_mmapstore_f32!(GGMLType::F32, VECTOR, D0);
 impl_tensorify_for_mmapstore_f32!(GGMLType::F32, MATRIX, D0, D1);
 
@@ -117,11 +116,11 @@ macro_rules! impl_tensorify_for_mmapstore_f16 {
         }
     };
 }
-
 impl_tensorify_for_mmapstore_f16!(GGMLType::F16, VECTOR, D0);
 impl_tensorify_for_mmapstore_f16!(GGMLType::F16, MATRIX, D0, D1);
 
-macro_rules! impl_tensorify_for_vecstore_f16 {
+
+macro_rules! impl_tensorify_for_vecstore_f32 {
     ($typ:path, $shape:ident, $($dim:ident),+) => {
         impl<'a, $(const $dim: usize),+> Tensorify<'a, f32, $shape<$($dim),+>, VecStore<f32>, &ModelFile>
             for GGUFTensor<()>
@@ -151,7 +150,38 @@ macro_rules! impl_tensorify_for_vecstore_f16 {
         }
     };
 }
+impl_tensorify_for_vecstore_f32!(GGMLType::F16, VECTOR, D0);
+impl_tensorify_for_vecstore_f32!(GGMLType::F16, MATRIX, D0, D1);
 
+macro_rules! impl_tensorify_for_vecstore_f16 {
+    ($typ:path, $shape:ident, $($dim:ident),+) => {
+        impl<'a, $(const $dim: usize),+> Tensorify<'a, f32, $shape<$($dim),+>, VecStore<f16>, &ModelFile>
+            for GGUFTensor<()>
+        {
+            fn to_tensor(
+                &self,
+                model: &ModelFile,
+            ) -> Result<Tensor<'a, false, f32, $shape<$($dim),+>, VecStore<f16>>, Box<dyn std::error::Error>> {
+                let d = self.dimensions.len();
+                if d != count!($($dim),+) || !check_dimensions!(self.dimensions, $($dim),+) {
+                    return Err(anyhow::anyhow!("wrong dimension for tensor '{}'", &self.name).into());
+                };
+                let n_elem: usize = self.dimensions.iter().fold(1, |a, b| a * b) as usize;
+                let mmap = &model.mmap;
+                let tensor_data_offset = model.tensor_data_offset;
+                let base_ptr = mmap.as_ptr();
+                let data = unsafe { base_ptr.add((tensor_data_offset + self.relative_offset) as usize) };
+                let slice = match self.tensor_type {
+                    GGMLType::F16 => unsafe { std::slice::from_raw_parts(data as *const f16, n_elem) },
+                    _ => return Err(anyhow::anyhow!("wrong type for tensor '{}'", &self.name).into()),
+                };
+                Ok(Tensor {
+                    store: slice.to_vec(),
+                })
+            }
+        }
+    };
+}
 impl_tensorify_for_vecstore_f16!(GGMLType::F16, VECTOR, D0);
 impl_tensorify_for_vecstore_f16!(GGMLType::F16, MATRIX, D0, D1);
 

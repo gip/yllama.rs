@@ -1,7 +1,7 @@
 use crate::*;
 use std::marker::PhantomData;
 
-// Shape //////////////////////////////////////////////////////////////////////
+// Shape traits ///////////////////////////////////////////////////////////////
 pub trait IsTensor {
     fn n_elem() -> usize;
     fn dim() -> usize;
@@ -32,9 +32,9 @@ impl<const D0: usize, const D1: usize> IsTensor for MATRIX<D0, D1> {
         2
     }
 }
-impl<const D0: usize, const D1: usize> IsVector for MATRIX<D0, D1> {}
+impl<const D0: usize, const D1: usize> IsMatrix for MATRIX<D0, D1> {}
 
-// Tensor /////////////////////////////////////////////////////////////////////
+// Tensor traits //////////////////////////////////////////////////////////////
 pub trait TensorTypes<T, SHAPE> {
     type StoreType<'a>
     where
@@ -68,6 +68,33 @@ pub trait TWriter<T: Copy, SHAPE: IsTensor>: TReader<T, SHAPE> {
 pub trait TWrite<T: Copy> {
     fn writing(&mut self) -> &mut [T];
 }
+
+
+// Tensor /////////////////////////////////////////////////////////////////////
+/// A tensor is 
+pub struct Tensor<'a, const RW: bool, T: 'a, SHAPE: IsTensor, U: TensorTypes<T, SHAPE>> {
+    pub store: U::StoreType<'a>,
+}
+
+pub trait Rowable<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
+    type RowStoreType: TensorTypes<T, V<D0>>;
+    type RowTensorType<'a>: TReader<T, V<D0>>
+    where
+        Self: 'a;
+    fn row<'a>(&'a self, i: usize) -> Self::RowTensorType<'a>;
+}
+
+pub trait RowableMut<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
+    type RowStoreType: TensorTypes<T, V<D0>>;
+    type RowTensorType<'a>: TReader<T, V<D0>>
+    where
+        Self: 'a;
+    fn row<'a>(&'a mut self, i: usize) -> Self::RowTensorType<'a>;
+}
+
+pub type VectorImm<'a, T, const D0: usize, U> = Tensor<'a, false, T, VECTOR<D0>, U>;
+pub type Tensor2Imm<'a, T, const D0: usize, const D1: usize, U> =
+    Tensor<'a, false, T, MATRIX<D0, D1>, U>;
 
 // TensorMut //////////////////////////////////////////////////////////////////
 type TensorMut<'a, T, SHAPE, U = VecStore<T>> = Tensor<'a, true, T, SHAPE, U>;
@@ -108,13 +135,10 @@ impl<'a, T, const D0: usize> Index<usize> for TensorMut<'a, T, VECTOR<D0>> {
     fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
         let reader = self.reader();
         let slice = reader.reading();
-        #[cfg(debug_assertions)]
+        debug_assert!(index < D0);
         unsafe {
-            std::mem::transmute(slice.get_unchecked(index))
-        }
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            std::mem::transmute(slice.get(index))
+            let ptr = slice.as_ptr().add(index);
+            &*ptr
         }
     }
 }
@@ -124,13 +148,10 @@ impl<'a, T, const D0: usize> Index<usize> for TensorMut<'a, T, VECTOR<D0>, SubSt
     fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
         let reader = self.reader();
         let slice = reader.reading();
-        #[cfg(debug_assertions)]
+        debug_assert!(index < D0);
         unsafe {
-            std::mem::transmute(slice.get_unchecked(index))
-        }
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            std::mem::transmute(slice.get(index))
+            let ptr = slice.as_ptr().add(index);
+            &*ptr
         }
     }
 }
@@ -140,13 +161,10 @@ impl<'a, T, const D0: usize> Index<usize> for TensorMut<'a, T, VECTOR<D0>, SubSt
     fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
         let reader = self.reader();
         let slice = reader.reading();
-        #[cfg(debug_assertions)]
+        debug_assert!(index < D0);
         unsafe {
-            std::mem::transmute(slice.get_unchecked(index))
-        }
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            std::mem::transmute(slice.get(index))
+            let ptr = slice.as_ptr().add(index);
+            &*ptr
         }
     }
 }
@@ -156,13 +174,10 @@ impl<'a, T: Copy, const D0: usize> IndexMut<usize> for TensorMut<'a, T, VECTOR<D
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let mut writer = self.writer();
         let slice = writer.writing();
-        #[cfg(debug_assertions)]
+        debug_assert!(index < D0);
         unsafe {
-            std::mem::transmute(slice.get_unchecked_mut(index))
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            unsafe { std::mem::transmute(slice.get_mut(index)) }
+            let ptr = slice.as_mut_ptr().add(index);
+            &mut *ptr
         }
     }
 }
@@ -174,13 +189,10 @@ impl<'a, T: Copy, const D0: usize> IndexMut<usize>
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let mut writer = self.writer();
         let slice = writer.writing();
-        #[cfg(debug_assertions)]
+        debug_assert!(index < D0);
         unsafe {
-            std::mem::transmute(slice.get_unchecked_mut(index))
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            unsafe { std::mem::transmute(slice.get_mut(index)) }
+            let ptr = slice.as_mut_ptr().add(index);
+            &mut *ptr
         }
     }
 }
@@ -202,7 +214,6 @@ impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)>
     fn index_mut(&mut self, (i, j): (usize, usize)) -> &mut Self::Output {
         debug_assert!(i < D1 && j < D0);
         unsafe { self.store.as_mut_slice().get_unchecked_mut(i * D0 + j) }
-        //&mut self.slice[i * d0 + j]
     }
 }
 
@@ -221,15 +232,6 @@ where
         }
     }
 }
-
-// Tensor /////////////////////////////////////////////////////////////////////
-pub struct Tensor<'a, const RW: bool, T: 'a, SHAPE: IsTensor, U: TensorTypes<T, SHAPE>> {
-    pub store: U::StoreType<'a>,
-}
-
-pub type VectorImm<'a, T, const D0: usize, U> = Tensor<'a, false, T, VECTOR<D0>, U>;
-pub type Tensor2Imm<'a, T, const D0: usize, const D1: usize, U> =
-    Tensor<'a, false, T, MATRIX<D0, D1>, U>;
 
 // MmapStore //////////////////////////////////////////////////////////////////
 pub struct MmapStore<T, U, const CP: bool = true> {
@@ -299,13 +301,10 @@ where
     fn index(&self, index: usize) -> &T {
         let reader = self.reader();
         let slice = reader.reading();
-        #[cfg(debug_assertions)]
+        debug_assert!(index < SHAPE::n_elem());
         unsafe {
-            std::mem::transmute(slice.get_unchecked(index))
-        }
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            std::mem::transmute(slice.get(index))
+            let ptr = slice.as_ptr().add(index);
+            &*ptr
         }
     }
 }
@@ -376,13 +375,10 @@ impl<'a, T, SHAPE: IsVector + 'a> Index<usize> for Tensor<'a, false, T, SHAPE, S
     fn index(&self, index: usize) -> &T {
         let reader = self.reader();
         let slice = <&[T] as tensor::TRead<T>>::reading(&reader);
-        #[cfg(debug_assertions)]
+        debug_assert!(index < SHAPE::n_elem());
         unsafe {
-            std::mem::transmute(slice.get_unchecked(index))
-        }
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            std::mem::transmute(slice.get(index))
+            let ptr = slice.as_ptr().add(index);
+            &*ptr
         }
     }
 }
@@ -402,6 +398,19 @@ impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for Tensor<'a, false, T, SHAPE, V
     type Reader<'b> = &'b [T] where Self: 'b;
     fn reader<'c>(&'c self) -> Self::Reader<'c> {
         &self.store.as_slice()
+    }
+}
+
+impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for VecStore<f16> {
+    type StoreType<'a> = Vec<f16>;
+    type ReaderType<'a> = &'a [f16];
+    type WriterType<'a> =();
+}
+
+impl<'a, SHAPE: IsTensor> TReader<f32, SHAPE> for Tensor<'a, false, f32, SHAPE, VecStore<f16>> {
+    type Reader<'b> = Vec<f32> where Self: 'b;
+    fn reader<'c>(&'c self) -> Self::Reader<'c> {
+        self.store.iter().map(|x| (*x).into()).collect()
     }
 }
 
@@ -439,20 +448,4 @@ impl<'a: 'b, 'b, T: Copy> TWrite<T> for &'b mut [T] {
     fn writing(&mut self) -> &mut [T] {
         self
     }
-}
-
-//
-pub trait Rowable<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
-    type RowStoreType: TensorTypes<T, V<D0>>;
-    type RowTensorType<'a>: TReader<T, V<D0>>
-    where
-        Self: 'a;
-    fn row<'a>(&'a self, i: usize) -> Self::RowTensorType<'a>;
-}
-pub trait RowableMut<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
-    type RowStoreType: TensorTypes<T, V<D0>>;
-    type RowTensorType<'a>: TReader<T, V<D0>>
-    where
-        Self: 'a;
-    fn row<'a>(&'a mut self, i: usize) -> Self::RowTensorType<'a>;
 }

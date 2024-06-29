@@ -44,6 +44,7 @@ pub struct Llama<
     const VOCAB: usize = 128256,
     const FF: usize = 14336,
     const KV: usize = 1024,
+    const CONTEXT: usize = 2048,
 > where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
     AttnK: TensorTypes<T, M<EMBED, KV>>,
@@ -76,6 +77,7 @@ pub struct Llama<
             VOCAB,
             FF,
             KV,
+            CONTEXT,
         >,
     >,
     token_embd: Tensor2Imm<'a, T, EMBED, VOCAB, TokenEmbd>,
@@ -101,6 +103,7 @@ struct LlamaBlock<
     const VOCAB: usize,
     const FF: usize,
     const KV: usize,
+    const CONTEXT: usize,
 > where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
     AttnK: TensorTypes<T, M<EMBED, KV>>,
@@ -134,14 +137,8 @@ struct LlamaBlock<
     q: VectorMut<'a, T, EMBED>,
     k_cache: Tensor2Mut<'a, T, KV, EMBED>,
     v_cache: Tensor2Mut<'a, T, KV, EMBED>,
-    attn_score: Tensor2Mut<'a, T, 32, KV>,
+    attn_score: Tensor2Mut<'a, T, CONTEXT, KV>,
 }
-
-// impl<'a, T, SHAPE: IsTensor, TYP: TensorTypes<T, SHAPE>> Initializable<ModelFile> for TensorMut<'a, T, SHAPE, TYP> {
-//     fn initialize(model: &ModelFile, name: &str) -> Tensor<'a, false, T, SHAPE, TYP> {
-//         TensorMut::new()
-//     }
-// }
 
 impl<
         'a,
@@ -159,6 +156,7 @@ impl<
         const VOCAB: usize,
         const FF: usize,
         const KV: usize,
+        const CONTEXT: usize,
     >
     LlamaBlock<
         'a,
@@ -176,10 +174,11 @@ impl<
         VOCAB,
         FF,
         KV,
+        CONTEXT,
     >
 where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
-    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>> + 'a,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
 
     AttnK: TensorTypes<T, M<EMBED, KV>>,
@@ -436,7 +435,7 @@ impl<
         KV,
     >
 where
-    AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
+    AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
     Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
 
@@ -593,7 +592,7 @@ impl<
         KV,
     >
 where
-    AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
+    AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
     Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
 

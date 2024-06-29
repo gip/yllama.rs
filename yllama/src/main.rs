@@ -32,16 +32,17 @@ unsafe fn process(
             type A = MmapStore<f32, f32>;
             type B = MmapStore<f32, f16>;
             type C = VecStore<f32>;
-            type D = VecStore<f32>;
+            type D = VecStore<f16>;
             let typ = llama::llama_find_type(&model)?;
             // This is UGLY - TODO: improve on it!
             match typ {
                 "F16" => {
-                    type LlamaType<'a> = Llama<'a, f32, C, B, A, B, B, B, D, B, B, A, B, B>;
+                    type LlamaType<'a> = Llama<'a, f32, C, B, A, B, B, B, A, B, B, A, B, B>;
                     let mut runnable: LlamaType = LLM::build(&model, tokenizer_path)?;
                     runnable.run(prompt)
                 }
                 "F32" => {
+                    // type LlamaType<'a> = Llama<'a, f32, C, C, C, C, C, C, C, C, C, C, C, C>;
                     let mut runnable: Llama<f32> = LLM::build(&model, tokenizer_path)?;
                     runnable.run(prompt)
                 }
