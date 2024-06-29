@@ -1,46 +1,19 @@
 pub mod gpt;
 pub mod llama;
-pub mod model;
+pub use gpt::Gpt;
+pub mod llm;
 
 use anyhow::anyhow;
 use clap::Parser;
-pub use gpt::Gpt;
 use half::f16;
-use llama::Llama;
-use model::LLM;
-use num_traits::float::Float;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::str;
-use yloader::{load_build, load_fast};
-use ymath::function::max;
-use ymath::tensor::{MmapStore, VecStore, VectorMut};
 
-unsafe fn run<'a, T: Float, M, const EMBED: usize, const VOCAB: usize>(
-    mut llm: impl LLM<'a, T, u32, M, EMBED, VOCAB> + 'a,
-    prompt: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let input = prompt;
-    let tokens: Vec<u32> = llm.encode(input)?;
-    let mut logits: VectorMut<T, VOCAB> = VectorMut::new();
-    let mut x: VectorMut<T, EMBED> = VectorMut::new();
-    let mut next_token = tokens[0];
-    let mut chat = vec![];
-    for pos in 0..1024 {
-        chat.push(next_token);
-        println!("{}", llm.decode(&chat));
-        llm.embed(&mut x, next_token, pos);
-        llm.forward(&mut x, pos);
-        llm.logits(&mut logits, &mut x);
-        let (tk, _) = max(&mut logits);
-        if pos + 1 < tokens.len() {
-            next_token = tokens[pos + 1];
-        } else {
-            next_token = tk as u32;
-        }
-    }
-    Ok(())
-}
+use llama::Llama;
+use llm::LLM;
+use yloader::{load_build, load_fast};
+use ymath::tensor::{MmapStore, VecStore};
 
 unsafe fn process(
     path: &str,
@@ -58,18 +31,20 @@ unsafe fn process(
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
             type B = MmapStore<f32, f16>;
-            type C = VecStore<f32, f16>;
-            type D = VecStore<f32, f32>;
+            type C = VecStore<f32>;
+            type D = VecStore<f16>;
             let typ = llama::llama_find_type(&model)?;
+            // This is UGLY - TODO: improve on it!
             match typ {
                 "F16" => {
-                    let runnable: Llama<f32, C, B, A, B, B, B, D, B, B, A, B, B> =
-                        LLM::build(&model, tokenizer_path)?;
-                    run(runnable, prompt)
+                    type LlamaType<'a> = Llama<'a, f32, C, B, A, B, B, B, A, B, B, A, B, B>;
+                    let mut runnable: LlamaType = LLM::build(&model, tokenizer_path)?;
+                    runnable.run(prompt)
                 }
                 "F32" => {
-                    let runnable: Llama<f32> = LLM::build(&model, tokenizer_path)?;
-                    run(runnable, prompt)
+                    // type LlamaType<'a> = Llama<'a, f32, C, C, C, C, C, C, C, C, C, C, C, C>;
+                    let mut runnable: Llama<f32> = LLM::build(&model, tokenizer_path)?;
+                    runnable.run(prompt)
                 }
                 _ => Err(anyhow!("Unknown configuration").into()),
             }

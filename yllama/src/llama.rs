@@ -1,4 +1,4 @@
-use crate::model::LLM;
+use crate::llm::LLM;
 use anyhow::anyhow;
 use num_traits::float::Float;
 use tokenizers::tokenizer::Tokenizer;
@@ -44,6 +44,7 @@ pub struct Llama<
     const VOCAB: usize = 128256,
     const FF: usize = 14336,
     const KV: usize = 1024,
+    const CONTEXT: usize = 2048,
 > where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
     AttnK: TensorTypes<T, M<EMBED, KV>>,
@@ -76,6 +77,7 @@ pub struct Llama<
             VOCAB,
             FF,
             KV,
+            CONTEXT,
         >,
     >,
     token_embd: Tensor2Imm<'a, T, EMBED, VOCAB, TokenEmbd>,
@@ -101,6 +103,7 @@ struct LlamaBlock<
     const VOCAB: usize,
     const FF: usize,
     const KV: usize,
+    const CONTEXT: usize,
 > where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
     AttnK: TensorTypes<T, M<EMBED, KV>>,
@@ -134,7 +137,7 @@ struct LlamaBlock<
     q: VectorMut<'a, T, EMBED>,
     k_cache: Tensor2Mut<'a, T, KV, EMBED>,
     v_cache: Tensor2Mut<'a, T, KV, EMBED>,
-    attn_score: Tensor2Mut<'a, T, 32, KV>,
+    attn_score: Tensor2Mut<'a, T, CONTEXT, KV>,
 }
 
 impl<
@@ -153,6 +156,7 @@ impl<
         const VOCAB: usize,
         const FF: usize,
         const KV: usize,
+        const CONTEXT: usize,
     >
     LlamaBlock<
         'a,
@@ -170,43 +174,45 @@ impl<
         VOCAB,
         FF,
         KV,
+        CONTEXT,
     >
 where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
-    TensorImm<'a, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>> + 'a,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
 
     AttnK: TensorTypes<T, M<EMBED, KV>>,
-    TensorImm<'a, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnK, &'a ModelFile>,
 
     AttnV: TensorTypes<T, M<EMBED, KV>>,
-    TensorImm<'a, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnV, &'a ModelFile>,
 
     AttnNorm: TensorTypes<T, V<EMBED>>,
-    TensorImm<'a, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, AttnNorm, &'a ModelFile>,
 
     AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
-    TensorImm<'a, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnOutput, &'a ModelFile>,
 
     FfnUp: TensorTypes<T, M<EMBED, FF>>,
-    TensorImm<'a, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnUp, &'a ModelFile>,
 
     FfnDown: TensorTypes<T, M<FF, EMBED>>,
-    TensorImm<'a, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<FF, EMBED>, FfnDown, &'a ModelFile>,
 
     FfnNorm: TensorTypes<T, V<EMBED>>,
-    TensorImm<'a, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, FfnNorm, &'a ModelFile>,
 
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
-    TensorImm<'a, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
+
 {
     fn new(model: &'a ModelFile, i: usize, params: LlamaParams<T>) -> Result<Self, anyhow::Error> {
         macro_rules! build_tensor {
@@ -429,40 +435,40 @@ impl<
         KV,
     >
 where
-    AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
-    TensorImm<'a, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
+    AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
 
     AttnK: TensorTypes<T, M<EMBED, KV>>,
-    TensorImm<'a, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnK, &'a ModelFile>,
 
     AttnV: TensorTypes<T, M<EMBED, KV>>,
-    TensorImm<'a, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnV, &'a ModelFile>,
 
     AttnNorm: TensorTypes<T, V<EMBED>>,
-    TensorImm<'a, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, AttnNorm, &'a ModelFile>,
 
     AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
-    TensorImm<'a, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnOutput, &'a ModelFile>,
 
     FfnUp: TensorTypes<T, M<EMBED, FF>>,
-    TensorImm<'a, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnUp, &'a ModelFile>,
 
     FfnDown: TensorTypes<T, M<FF, EMBED>>,
-    TensorImm<'a, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<FF, EMBED>, FfnDown, &'a ModelFile>,
 
     FfnNorm: TensorTypes<T, V<EMBED>>,
-    TensorImm<'a, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, FfnNorm, &'a ModelFile>,
 
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
-    TensorImm<'a, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
 
     TokenEmbd: TensorTypes<T, M<EMBED, VOCAB>>,
@@ -586,52 +592,53 @@ impl<
         KV,
     >
 where
-    AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
-    TensorImm<'a, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
+    AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
 
     AttnK: TensorTypes<T, M<EMBED, KV>>,
-    TensorImm<'a, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnK, &'a ModelFile>,
 
     AttnV: TensorTypes<T, M<EMBED, KV>>,
-    TensorImm<'a, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnV, &'a ModelFile>,
 
     AttnNorm: TensorTypes<T, V<EMBED>>,
-    TensorImm<'a, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, AttnNorm, &'a ModelFile>,
 
     AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
-    TensorImm<'a, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnOutput, &'a ModelFile>,
 
     FfnUp: TensorTypes<T, M<EMBED, FF>>,
-    TensorImm<'a, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnUp, &'a ModelFile>,
 
     FfnDown: TensorTypes<T, M<FF, EMBED>>,
-    TensorImm<'a, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<FF, EMBED>, FfnDown, &'a ModelFile>,
 
     FfnNorm: TensorTypes<T, V<EMBED>>,
-    TensorImm<'a, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, FfnNorm, &'a ModelFile>,
 
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
-    TensorImm<'a, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
 
-    TokenEmbd: TensorTypes<T, M<EMBED, VOCAB>>,
-    TensorImm<'a, T, M<EMBED, VOCAB>, TokenEmbd>: TReader<T, M<EMBED, VOCAB>> + Rowable<T, EMBED>,
+    TokenEmbd: TensorTypes<T, M<EMBED, VOCAB>> + 'a,
+    Tensor<'a, false, T, M<EMBED, VOCAB>, TokenEmbd>:
+        TReader<T, M<EMBED, VOCAB>> + Rowable<T, EMBED, VOCAB, TokenEmbd>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, VOCAB>, TokenEmbd, &'a ModelFile>,
 
     Output: TensorTypes<T, M<EMBED, VOCAB>>,
-    TensorImm<'a, T, M<EMBED, VOCAB>, Output>: TReader<T, M<EMBED, VOCAB>>,
+    Tensor<'a, false, T, M<EMBED, VOCAB>, Output>: TReader<T, M<EMBED, VOCAB>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, VOCAB>, Output, &'a ModelFile>,
 
     OutputNorm: TensorTypes<T, V<EMBED>>,
-    TensorImm<'a, T, V<EMBED>, OutputNorm>: TReader<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, OutputNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, OutputNorm, &'a ModelFile>,
 {
     fn build<'b>(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
