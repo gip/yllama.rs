@@ -37,7 +37,8 @@ unsafe fn process(
             // This is UGLY - TODO: improve on it!
             match typ {
                 "F16" => {
-                    type LlamaType<'a> = Llama<'a, f32, C, B, A, B, B, B, A, B, B, A, B, B>;
+                    //type LlamaType<'a> = Llama<'a, f32, C, B, A, B, B, B, A, B, B, A, B, B>;
+                    type LlamaType<'a> = Llama<'a, f32, D, D, D, D, D, D, A, D, D, A, D, D>;
                     let mut runnable: LlamaType = LLM::build(&model, tokenizer_path)?;
                     runnable.run(prompt)
                 }

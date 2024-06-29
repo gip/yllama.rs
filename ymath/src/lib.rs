@@ -2,6 +2,7 @@ pub mod tensor;
 pub mod function {
     pub use super::*;
 }
+use rand::distributions::Slice;
 use tensor::*;
 
 use half::f16;
@@ -31,23 +32,30 @@ pub fn softmax<T: Float, const D0: usize>(v: &mut impl TWriter<T, VECTOR<D0>>, s
     }
 }
 
-pub unsafe fn matmul<T: Float, const D0: usize, const D1: usize>(
-    v1: &mut impl TWriter<T, VECTOR<D1>>,
-    m0: &impl TReader<T, MATRIX<D0, D1>>,
-    v0: &impl TReader<T, VECTOR<D0>>,
-) {
-    let m0_reader = m0.reader();
-    let m0_slice = m0_reader.reading();
-    let v0_reader = v0.reader();
-    let v0_slice = v0_reader.reading();
-    let mut v1_writer = v1.writer();
-    let v1_slice = v1_writer.writing();
+pub unsafe fn matmul<'a, T, M0, V0, V1, const D0: usize, const D1: usize>(
+    v1: &'a mut V1,
+    m0: &'a M0,
+    v0: &'a V0,
+) where
+    T: Float + 'a,
+    M0: TReader<T, MATRIX<D0, D1>>,
+    V0: TReader<T, VECTOR<D0>>,
+    V1: TWriter<T, VECTOR<D1>>,
+    M0::Reader<'a>: Index<(usize, usize), Output = T>,
+    V0::Reader<'a>: Index<usize, Output = T>,
+    V1::Writer<'a>: IndexMut<usize, Output = T> + Sized,
+{
+    let m0 = m0.reader();
+    let v0 = v0.reader();
+    let mut v1 = v1.writer();
     for i in 0..D1 {
         let mut r = T::zero();
         for j in 0..D0 {
-            r = r + m0_slice[i * D0 + j] * v0_slice[j];
+            let m_val: T = m0[(i, j)];
+            let v_val: T = v0[j];
+            r = r + m_val * v_val;
         }
-        v1_slice[i] = r;
+        v1[i] = r;
     }
 }
 
@@ -92,10 +100,8 @@ pub fn cp<'a, T: Float, const D0: usize>(
     x: &'a mut impl TWriter<T, VECTOR<D0>>,
     y: &'a impl TReader<T, VECTOR<D0>>,
 ) {
-    let y = y.reader();
-    let ys = y.reading();
-    let mut x = x.writer();
-    let xs = x.writing();
+    let ys = y.reader();
+    let mut xs = x.writer();
     for i in 0..D0 {
         xs[i] = ys[i];
     }
