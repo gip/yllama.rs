@@ -119,7 +119,6 @@ macro_rules! impl_tensorify_for_mmapstore_f16 {
 impl_tensorify_for_mmapstore_f16!(GGMLType::F16, VECTOR, D0);
 impl_tensorify_for_mmapstore_f16!(GGMLType::F16, MATRIX, D0, D1);
 
-
 macro_rules! impl_tensorify_for_vecstore_f32 {
     ($typ:path, $shape:ident, $($dim:ident),+) => {
         impl<'a, $(const $dim: usize),+> Tensorify<'a, f32, $shape<$($dim),+>, VecStore<f32>, &ModelFile>
