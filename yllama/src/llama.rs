@@ -363,7 +363,10 @@ where
                     let v_offset = (h / kv_mul) * attn_head_size;
                     // Weighted value
                     for i in 0..attn_head_size {
-                        xbw.set(xb_offset + i, xbw.get(xb_offset + i) + a * v_w.get(v_offset + i));
+                        xbw.set(
+                            xb_offset + i,
+                            xbw.get(xb_offset + i) + a * v_w.get(v_offset + i),
+                        );
                     }
                 }
             }

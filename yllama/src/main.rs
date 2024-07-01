@@ -30,8 +30,8 @@ unsafe fn process(
         "llama" => {
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
-            type B = MmapStore<f32, f16>;
-            type C = VecStore<f32>;
+            // type B = MmapStore<f32, f16>;
+            // type C = VecStore<f32>;
             type D = VecStore<f16>;
             let typ = llama::llama_find_type(&model)?;
             // This is UGLY - TODO: improve on it!

@@ -90,7 +90,9 @@ impl<'a, T: Copy, const D0: usize> TGet<usize> for TSlice<'a, T, V<D0>> {
     type Output = T;
     fn get(&self, i: usize) -> Self::Output {
         #[cfg(not(debug_assertions))]
-        unsafe { *self.slice.get_unchecked(i) }
+        unsafe {
+            *self.slice.get_unchecked(i)
+        }
         #[cfg(debug_assertions)]
         self.slice[i]
     }
@@ -100,17 +102,23 @@ impl<'a, const D0: usize> TGet<usize> for TSlice<'a, f32, V<D0>, f16> {
     type Output = f32;
     fn get(&self, i: usize) -> Self::Output {
         #[cfg(not(debug_assertions))]
-        unsafe { (*self.slice.get_unchecked(i)).into() }
+        unsafe {
+            (*self.slice.get_unchecked(i)).into()
+        }
         #[cfg(debug_assertions)]
         self.slice[i].into()
     }
 }
 
-impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)> for TSlice<'a, T, M<D0, D1>> {
+impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
+    for TSlice<'a, T, M<D0, D1>>
+{
     type Output = T;
     fn get(&self, (i, j): (usize, usize)) -> Self::Output {
         #[cfg(not(debug_assertions))]
-        unsafe { *self.slice.get_unchecked(i * D0 + j) }
+        unsafe {
+            *self.slice.get_unchecked(i * D0 + j)
+        }
         #[cfg(debug_assertions)]
         self.slice[i * D0 + j]
     }
@@ -120,7 +128,9 @@ impl<'a, T: Copy, const D0: usize> TGet<usize> for TSliceMut<'a, T, V<D0>> {
     type Output = T;
     fn get(&self, i: usize) -> Self::Output {
         #[cfg(not(debug_assertions))]
-        unsafe { *self.slice.get_unchecked(i) }
+        unsafe {
+            *self.slice.get_unchecked(i)
+        }
         #[cfg(debug_assertions)]
         self.slice[i]
     }
@@ -132,7 +142,9 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
     type Output = T;
     fn get(&self, (i, j): (usize, usize)) -> Self::Output {
         #[cfg(not(debug_assertions))]
-        unsafe { *self.slice.get_unchecked(i * D0 + j) }
+        unsafe {
+            *self.slice.get_unchecked(i * D0 + j)
+        }
         #[cfg(debug_assertions)]
         self.slice[i * D0 + j]
     }
@@ -141,9 +153,13 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
 impl<'a, T: Copy, const D0: usize> TSet<usize> for TSliceMut<'a, T, V<D0>> {
     fn set(&mut self, i: usize, val: T) {
         #[cfg(not(debug_assertions))]
-        unsafe { *self.slice.get_unchecked_mut(i) = val }
+        unsafe {
+            *self.slice.get_unchecked_mut(i) = val
+        }
         #[cfg(debug_assertions)]
-        { self.slice[i] = val }
+        {
+            self.slice[i] = val
+        }
     }
 }
 
@@ -152,9 +168,13 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TSet<(usize, usize)>
 {
     fn set(&mut self, (i, j): (usize, usize), val: T) {
         #[cfg(not(debug_assertions))]
-        unsafe { *self.slice.get_unchecked_mut(i * D0 + j) = val }
+        unsafe {
+            *self.slice.get_unchecked_mut(i * D0 + j) = val
+        }
         #[cfg(debug_assertions)]
-        { self.slice[i * D0 + j] = val }
+        {
+            self.slice[i * D0 + j] = val
+        }
     }
 }
 
@@ -222,8 +242,7 @@ type TensorMut<'a, T, SHAPE, U = VecStore<T>> = Tensor<'a, true, T, SHAPE, U>;
 pub type VectorMut<'a, T, const D0: usize> = TensorMut<'a, T, VECTOR<D0>>;
 pub type Tensor2Mut<'a, T, const D0: usize, const D1: usize> = TensorMut<'a, T, MATRIX<D0, D1>>;
 
-impl<'a, T: Copy, const D0: usize> TReader<T, V<D0>> for TensorMut<'a, T, V<D0>>
-{
+impl<'a, T: Copy, const D0: usize> TReader<T, V<D0>> for TensorMut<'a, T, V<D0>> {
     type Reader<'b> = TSlice<'b, T, V<D0>> where Self: 'b;
     fn reader(&self) -> Self::Reader<'_> {
         TSlice {
@@ -234,7 +253,8 @@ impl<'a, T: Copy, const D0: usize> TReader<T, V<D0>> for TensorMut<'a, T, V<D0>>
     }
 }
 
-impl<'a, T: Copy, const D0: usize, const D1: usize> TReader<T, M<D0, D1>> for TensorMut<'a, T, M<D0, D1>>
+impl<'a, T: Copy, const D0: usize, const D1: usize> TReader<T, M<D0, D1>>
+    for TensorMut<'a, T, M<D0, D1>>
 {
     type Reader<'b> = TSlice<'b, T, M<D0, D1>> where Self: 'b;
     fn reader(&self) -> Self::Reader<'_> {
@@ -246,8 +266,7 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TReader<T, M<D0, D1>> for Te
     }
 }
 
-impl<'a, T: Copy, const D0: usize> TWriter<T, V<D0>> for TensorMut<'a, T, V<D0>>
-{
+impl<'a, T: Copy, const D0: usize> TWriter<T, V<D0>> for TensorMut<'a, T, V<D0>> {
     type Writer<'b> = TSliceMut<'b, T, V<D0>> where Self: 'b;
     fn writer(&mut self) -> Self::Writer<'_> {
         TSliceMut {
@@ -257,7 +276,8 @@ impl<'a, T: Copy, const D0: usize> TWriter<T, V<D0>> for TensorMut<'a, T, V<D0>>
     }
 }
 
-impl<'a, T: Copy, const D0: usize, const D1: usize> TWriter<T, M<D0, D1>> for TensorMut<'a, T, M<D0, D1>>
+impl<'a, T: Copy, const D0: usize, const D1: usize> TWriter<T, M<D0, D1>>
+    for TensorMut<'a, T, M<D0, D1>>
 {
     type Writer<'b> = TSliceMut<'b, T, M<D0, D1>> where Self: 'b;
     fn writer(&mut self) -> Self::Writer<'_> {
@@ -452,8 +472,9 @@ where
 
 impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE, f16>
     for Tensor<'a, false, f32, SHAPE, SubStore<f16, false>>
-where SubStore<f16>: TensorTypes<f16, SHAPE>,
-      for<'c> TSlice<'c, f32, SHAPE, f16>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
+where
+    SubStore<f16>: TensorTypes<f16, SHAPE>,
+    for<'c> TSlice<'c, f32, SHAPE, f16>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
 {
     type Reader<'b> = TSlice<'b, f32, SHAPE, f16> where Self: 'b;
     fn reader(&self) -> Self::Reader<'_> {
@@ -467,8 +488,9 @@ where SubStore<f16>: TensorTypes<f16, SHAPE>,
 
 impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE>
     for Tensor<'a, false, f32, SHAPE, SubStore<f16, false>>
-where SubStore<f16>: TensorTypes<f16, SHAPE>,
-      for<'c> TVec<f32, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
+where
+    SubStore<f16>: TensorTypes<f16, SHAPE>,
+    for<'c> TVec<f32, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
 {
     type Reader<'b> = TVec<f32, SHAPE> where Self: 'b;
     fn reader(&self) -> Self::Reader<'_> {
@@ -547,8 +569,6 @@ where
 
 impl<'a, const D0: usize, const D1: usize> Rowable<f32, D0, D1, VecStore<f16>>
     for Tensor<'a, false, f32, MATRIX<D0, D1>, VecStore<f16>>
-where
-
 {
     type RowStoreType = SubStore<f16>;
     type RowTensorType<'b> = Tensor<'b, false, f32, VECTOR<D0>, SubStore<f16>> where Self: 'b;
