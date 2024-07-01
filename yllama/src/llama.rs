@@ -212,7 +212,6 @@ where
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
     Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
-
 {
     fn new(model: &'a ModelFile, i: usize, params: LlamaParams<T>) -> Result<Self, anyhow::Error> {
         macro_rules! build_tensor {
@@ -296,6 +295,9 @@ where
         matmul(k, &mut self.attn_k, xb);
         matmul(v, &mut self.attn_v, xb);
 
+        let mut qw = q.writer();
+        let mut kw = k.writer();
+
         // RoPE
         let attn_head_size = self.params.embedding_length / self.params.attention_head_count;
         let kv_mul = 4; // TODO: remove hardcoded
@@ -310,15 +312,15 @@ where
                 let val = T::from(pos).unwrap() * freq;
                 let fcr = T::cos(val);
                 let fci = T::sin(val);
-                let q0 = q[i * attn_head_size + j];
-                let q1 = q[i * attn_head_size + j + 1];
-                q[i * attn_head_size + j] = q0 * fcr - q1 * fci;
-                q[i * attn_head_size + j + 1] = q0 * fci + q1 * fcr;
+                let q0 = qw.get(i * attn_head_size + j);
+                let q1 = qw.get(i * attn_head_size + j + 1);
+                qw.set(i * attn_head_size + j, q0 * fcr - q1 * fci);
+                qw.set(i * attn_head_size + j + 1, q0 * fci + q1 * fcr);
                 if i < self.params.attention_head_count_kv {
-                    let k0 = k[i * attn_head_size + j];
-                    let k1 = k[i * attn_head_size + j + 1];
-                    k[i * attn_head_size + j] = k0 * fcr - k1 * fci;
-                    k[i * attn_head_size + j + 1] = k0 * fci + k1 * fcr;
+                    let k0 = kw.get(i * attn_head_size + j);
+                    let k1 = kw.get(i * attn_head_size + j + 1);
+                    kw.set(i * attn_head_size + j, k0 * fcr - k1 * fci);
+                    kw.set(i * attn_head_size + j + 1, k0 * fci + k1 * fcr);
                 }
             }
         }
@@ -326,34 +328,43 @@ where
         // Multihead attention
         for h in 0..self.params.attention_head_count {
             let attn_score = &mut self.attn_score.row(h);
-            let q_offset = h * attn_head_size;
-            for t in 0..(pos + 1) {
-                let mut score = T::zero();
-                let k = &mut self.k_cache.row(t);
-                let k_offset = (h / kv_mul) * attn_head_size;
-                for i in 0..attn_head_size {
-                    score = score + q[q_offset + i] * k[k_offset + i];
+            {
+                let mut attn_score_w = attn_score.writer();
+                let q_offset = h * attn_head_size;
+                for t in 0..(pos + 1) {
+                    let mut score = T::zero();
+                    let k = &mut self.k_cache.row(t);
+                    let kw = k.writer();
+                    let k_offset = (h / kv_mul) * attn_head_size;
+                    for i in 0..attn_head_size {
+                        score = score + qw.get(q_offset + i) * kw.get(k_offset + i);
+                    }
+                    score = score / T::sqrt(T::from(attn_head_size).unwrap());
+                    attn_score_w.set(t, score);
                 }
-                score = score / T::sqrt(T::from(attn_head_size).unwrap());
-                attn_score[t] = score;
             }
 
             // Softmax from 0..p inclusively
             softmax(attn_score, pos + 1);
 
             // Weighted sum of the values, store back into xb
-            let xb_offset = h * attn_head_size;
-            for i in 0..attn_head_size {
-                xb[xb_offset + i] = T::zero(); // TODO: Optimize? Can we memset?
-            }
-            for t in 0..(pos + 1) {
-                // Attention weight for this timesetp
-                let a = attn_score[t];
-                let v = &mut self.v_cache.row(t);
-                let v_offset = (h / kv_mul) * attn_head_size;
-                // Weighted value
+            {
+                let xb_offset = h * attn_head_size;
+                let mut xbw = xb.writer();
+                let attn_score_w = attn_score.writer();
                 for i in 0..attn_head_size {
-                    xb[xb_offset + i] = xb[xb_offset + i] + a * v[v_offset + i];
+                    xbw.set(xb_offset + i, T::zero()); // TODO: Optimize? Can we memset?
+                }
+                for t in 0..(pos + 1) {
+                    // Attention weight for this timesetp
+                    let a = attn_score_w.get(t);
+                    let v = &mut self.v_cache.row(t);
+                    let v_w = v.writer();
+                    let v_offset = (h / kv_mul) * attn_head_size;
+                    // Weighted value
+                    for i in 0..attn_head_size {
+                        xbw.set(xb_offset + i, xbw.get(xb_offset + i) + a * v_w.get(v_offset + i));
+                    }
                 }
             }
         }
@@ -375,11 +386,15 @@ where
         // Non-linearity
         matmul(hb, &mut self.ffn_gate, xb);
         matmul(hb2, &mut self.ffn_up, xb);
-        for i in 0..self.params.feed_forward_length {
-            let mut val = hb[i];
-            val = val * (T::one() / (T::one() + T::exp(-val)));
-            val = val * hb2[i];
-            hb[i] = val;
+        {
+            let mut hbw = hb.writer();
+            let hb2w = hb2.writer();
+            for i in 0..self.params.feed_forward_length {
+                let mut val = hbw.get(i);
+                val = val * (T::one() / (T::one() + T::exp(-val)));
+                val = val * hb2w.get(i);
+                hbw.set(i, val);
+            }
         }
 
         // Ffn output
