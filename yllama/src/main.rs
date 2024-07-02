@@ -30,14 +30,14 @@ unsafe fn process(
         "llama" => {
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
-            type B = MmapStore<f32, f16>;
-            type C = VecStore<f32>;
+            // type B = MmapStore<f32, f16>;
+            // type C = VecStore<f32>;
             type D = VecStore<f16>;
             let typ = llama::llama_find_type(&model)?;
             // This is UGLY - TODO: improve on it!
             match typ {
                 "F16" => {
-                    type LlamaType<'a> = Llama<'a, f32, C, B, A, B, B, B, A, B, B, A, B, B>;
+                    type LlamaType<'a> = Llama<'a, f32, D, D, A, D, D, D, A, D, D, A, D, D>;
                     let mut runnable: LlamaType = LLM::build(&model, tokenizer_path)?;
                     runnable.run(prompt)
                 }

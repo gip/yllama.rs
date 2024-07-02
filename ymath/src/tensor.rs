@@ -45,33 +45,173 @@ pub trait TensorTypes<T, SHAPE> {
     type WriterType<'a>
     where
         T: 'a;
+    type ReaderTypeA<'a>
+    where
+        T: 'a;
+    type WriterTypeA<'a>
+    where
+        T: 'a;
 }
 
-pub trait TReader<T, SHAPE: IsTensor> {
-    type Reader<'b>: TRead<T>
+pub trait Indexable {
+    type IndexType;
+}
+
+impl<const D0: usize> Indexable for V<D0> {
+    type IndexType = usize;
+}
+
+impl<const D0: usize, const D1: usize> Indexable for M<D0, D1> {
+    type IndexType = (usize, usize);
+}
+
+pub trait TGet<Idx: ?Sized> {
+    type Output;
+    fn get(&self, index: Idx) -> Self::Output;
+}
+
+pub trait TSet<Idx: ?Sized>: TGet<Idx> {
+    fn set(&mut self, index: Idx, val: Self::Output);
+}
+
+// TSlice
+pub struct TSlice<'a, T, SHAPE: IsTensor, U = T> {
+    slice: &'a [U],
+    _phantom0: PhantomData<SHAPE>,
+    _phantom1: PhantomData<T>,
+}
+
+pub struct TSliceMut<'a, T, SHAPE: IsTensor> {
+    slice: &'a mut [T],
+    _phantom: PhantomData<SHAPE>,
+}
+
+impl<'a, T: Copy, const D0: usize> TGet<usize> for TSlice<'a, T, V<D0>> {
+    type Output = T;
+    fn get(&self, i: usize) -> Self::Output {
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *self.slice.get_unchecked(i)
+        }
+        #[cfg(debug_assertions)]
+        self.slice[i]
+    }
+}
+
+impl<'a, const D0: usize> TGet<usize> for TSlice<'a, f32, V<D0>, f16> {
+    type Output = f32;
+    fn get(&self, i: usize) -> Self::Output {
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            (*self.slice.get_unchecked(i)).into()
+        }
+        #[cfg(debug_assertions)]
+        self.slice[i].into()
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
+    for TSlice<'a, T, M<D0, D1>>
+{
+    type Output = T;
+    fn get(&self, (i, j): (usize, usize)) -> Self::Output {
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *self.slice.get_unchecked(i * D0 + j)
+        }
+        #[cfg(debug_assertions)]
+        self.slice[i * D0 + j]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize> TGet<usize> for TSliceMut<'a, T, V<D0>> {
+    type Output = T;
+    fn get(&self, i: usize) -> Self::Output {
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *self.slice.get_unchecked(i)
+        }
+        #[cfg(debug_assertions)]
+        self.slice[i]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
+    for TSliceMut<'a, T, M<D0, D1>>
+{
+    type Output = T;
+    fn get(&self, (i, j): (usize, usize)) -> Self::Output {
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *self.slice.get_unchecked(i * D0 + j)
+        }
+        #[cfg(debug_assertions)]
+        self.slice[i * D0 + j]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize> TSet<usize> for TSliceMut<'a, T, V<D0>> {
+    fn set(&mut self, i: usize, val: T) {
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *self.slice.get_unchecked_mut(i) = val
+        }
+        #[cfg(debug_assertions)]
+        {
+            self.slice[i] = val
+        }
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TSet<(usize, usize)>
+    for TSliceMut<'a, T, M<D0, D1>>
+{
+    fn set(&mut self, (i, j): (usize, usize), val: T) {
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *self.slice.get_unchecked_mut(i * D0 + j) = val
+        }
+        #[cfg(debug_assertions)]
+        {
+            self.slice[i * D0 + j] = val
+        }
+    }
+}
+
+pub struct TVec<T, SHAPE: IsTensor> {
+    vec: Vec<T>,
+    _phantom: PhantomData<SHAPE>,
+}
+
+impl<'a, T: Copy, const D0: usize> TGet<usize> for TVec<T, V<D0>> {
+    type Output = T;
+    fn get(&self, i: usize) -> Self::Output {
+        self.vec[i]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)> for TVec<T, M<D0, D1>> {
+    type Output = T;
+    fn get(&self, (i, j): (usize, usize)) -> Self::Output {
+        self.vec[i * D0 + j]
+    }
+}
+
+pub trait TReader<T, SHAPE: IsTensor + Indexable, U = T> {
+    type Reader<'b>: TGet<SHAPE::IndexType, Output = T>
     where
         Self: 'b;
     fn reader<'a>(&'a self) -> Self::Reader<'a>;
 }
 
-pub trait TRead<T> {
-    fn reading(&self) -> &[T];
-}
-
-pub trait TWriter<T: Copy, SHAPE: IsTensor>: TReader<T, SHAPE> {
-    type Writer<'b>: TWrite<T>
+pub trait TWriter<T: Copy, SHAPE: IsTensor + Indexable>: TReader<T, SHAPE> {
+    type Writer<'b>: TSet<SHAPE::IndexType, Output = T>
     where
         Self: 'b;
     fn writer<'a>(&'a mut self) -> Self::Writer<'a>;
 }
 
-pub trait TWrite<T: Copy> {
-    fn writing(&mut self) -> &mut [T];
-}
-
-
 // Tensor /////////////////////////////////////////////////////////////////////
-/// A tensor is 
 pub struct Tensor<'a, const RW: bool, T: 'a, SHAPE: IsTensor, U: TensorTypes<T, SHAPE>> {
     pub store: U::StoreType<'a>,
 }
@@ -84,9 +224,9 @@ pub trait Rowable<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D
     fn row<'a>(&'a self, i: usize) -> Self::RowTensorType<'a>;
 }
 
-pub trait RowableMut<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
+pub trait RowableMut<T: Copy, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
     type RowStoreType: TensorTypes<T, V<D0>>;
-    type RowTensorType<'a>: TReader<T, V<D0>>
+    type RowTensorType<'a>: TWriter<T, V<D0>>
     where
         Self: 'a;
     fn row<'a>(&'a mut self, i: usize) -> Self::RowTensorType<'a>;
@@ -102,17 +242,49 @@ type TensorMut<'a, T, SHAPE, U = VecStore<T>> = Tensor<'a, true, T, SHAPE, U>;
 pub type VectorMut<'a, T, const D0: usize> = TensorMut<'a, T, VECTOR<D0>>;
 pub type Tensor2Mut<'a, T, const D0: usize, const D1: usize> = TensorMut<'a, T, MATRIX<D0, D1>>;
 
-impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for TensorMut<'a, T, SHAPE> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader(&self) -> &[T] {
-        self.store.as_slice()
+impl<'a, T: Copy, const D0: usize> TReader<T, V<D0>> for TensorMut<'a, T, V<D0>> {
+    type Reader<'b> = TSlice<'b, T, V<D0>> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TSlice {
+            slice: self.store.as_slice(),
+            _phantom0: PhantomData,
+            _phantom1: PhantomData,
+        }
     }
 }
 
-impl<'a, T: Copy, SHAPE: IsTensor> TWriter<T, SHAPE> for TensorMut<'a, T, SHAPE> {
-    type Writer<'b> = &'b mut [T] where Self: 'b;
-    fn writer(&mut self) -> &mut [T] {
-        self.store.as_mut_slice()
+impl<'a, T: Copy, const D0: usize, const D1: usize> TReader<T, M<D0, D1>>
+    for TensorMut<'a, T, M<D0, D1>>
+{
+    type Reader<'b> = TSlice<'b, T, M<D0, D1>> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TSlice {
+            slice: self.store.as_slice(),
+            _phantom0: PhantomData,
+            _phantom1: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: Copy, const D0: usize> TWriter<T, V<D0>> for TensorMut<'a, T, V<D0>> {
+    type Writer<'b> = TSliceMut<'b, T, V<D0>> where Self: 'b;
+    fn writer(&mut self) -> Self::Writer<'_> {
+        TSliceMut {
+            slice: self.store.as_mut_slice(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TWriter<T, M<D0, D1>>
+    for TensorMut<'a, T, M<D0, D1>>
+{
+    type Writer<'b> = TSliceMut<'b, T, M<D0, D1>> where Self: 'b;
+    fn writer(&mut self) -> Self::Writer<'_> {
+        TSliceMut {
+            slice: self.store.as_mut_slice(),
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -130,94 +302,7 @@ impl<'a, T: Float, const D0: usize, const D1: usize> Tensor2Mut<'a, T, D0, D1> {
     }
 }
 
-impl<'a, T, const D0: usize> Index<usize> for TensorMut<'a, T, VECTOR<D0>> {
-    type Output = T;
-    fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
-        let reader = self.reader();
-        let slice = reader.reading();
-        debug_assert!(index < D0);
-        unsafe {
-            let ptr = slice.as_ptr().add(index);
-            &*ptr
-        }
-    }
-}
-
-impl<'a, T, const D0: usize> Index<usize> for TensorMut<'a, T, VECTOR<D0>, SubStore<T, true>> {
-    type Output = T;
-    fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
-        let reader = self.reader();
-        let slice = reader.reading();
-        debug_assert!(index < D0);
-        unsafe {
-            let ptr = slice.as_ptr().add(index);
-            &*ptr
-        }
-    }
-}
-
-impl<'a, T, const D0: usize> Index<usize> for TensorMut<'a, T, VECTOR<D0>, SubStore<T, false>> {
-    type Output = T;
-    fn index<'b>(&'b self, index: usize) -> &'b Self::Output {
-        let reader = self.reader();
-        let slice = reader.reading();
-        debug_assert!(index < D0);
-        unsafe {
-            let ptr = slice.as_ptr().add(index);
-            &*ptr
-        }
-    }
-}
-
-impl<'a, T: Copy, const D0: usize> IndexMut<usize> for TensorMut<'a, T, VECTOR<D0>> {
-    // Output defined in Index trait, T
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        let mut writer = self.writer();
-        let slice = writer.writing();
-        debug_assert!(index < D0);
-        unsafe {
-            let ptr = slice.as_mut_ptr().add(index);
-            &mut *ptr
-        }
-    }
-}
-
-impl<'a, T: Copy, const D0: usize> IndexMut<usize>
-    for TensorMut<'a, T, VECTOR<D0>, SubStore<T, true>>
-{
-    // Output defined in Index trait, T
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        let mut writer = self.writer();
-        let slice = writer.writing();
-        debug_assert!(index < D0);
-        unsafe {
-            let ptr = slice.as_mut_ptr().add(index);
-            &mut *ptr
-        }
-    }
-}
-
-impl<'a, T, const D0: usize, const D1: usize> Index<(usize, usize)>
-    for TensorMut<'a, T, MATRIX<D0, D1>>
-{
-    type Output = T;
-    fn index(&self, (i, j): (usize, usize)) -> &Self::Output {
-        debug_assert!(i < D1 && j < D0);
-        unsafe { &self.store.as_slice().get_unchecked(i * D0 + j) }
-    }
-}
-
-impl<'a, T, const D0: usize, const D1: usize> IndexMut<(usize, usize)>
-    for TensorMut<'a, T, MATRIX<D0, D1>>
-{
-    // Output defined in Index trait, T
-    fn index_mut(&mut self, (i, j): (usize, usize)) -> &mut Self::Output {
-        debug_assert!(i < D1 && j < D0);
-        unsafe { self.store.as_mut_slice().get_unchecked_mut(i * D0 + j) }
-    }
-}
-
-impl<'a, T, const D0: usize, const D1: usize> RowableMut<T, D0, D1, VecStore<T>>
+impl<'a, T: Copy, const D0: usize, const D1: usize> RowableMut<T, D0, D1, VecStore<T>>
     for Tensor<'a, true, T, MATRIX<D0, D1>, VecStore<T>>
 where
     T: 'a,
@@ -244,12 +329,22 @@ impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for MmapStore<T, T> {
     type StoreType<'a> = (Rc<Mmap>, &'a [T]) where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = &'a mut [T] where T: 'a;
+    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
+    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
 }
 
-impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for Tensor<'a, false, T, SHAPE, MmapStore<T, T>> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader<'c>(&'c self) -> Self::Reader<'c> {
-        self.store.1
+impl<'a, T, SHAPE: IsTensor + Indexable> TReader<T, SHAPE>
+    for Tensor<'a, false, T, SHAPE, MmapStore<T, T>>
+where
+    for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
+{
+    type Reader<'b> = TSlice<'b, T, SHAPE> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TSlice {
+            slice: self.store.1,
+            _phantom0: PhantomData,
+            _phantom1: PhantomData,
+        }
     }
 }
 
@@ -258,14 +353,21 @@ impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for MmapStore<f32, f16, true> {
     type StoreType<'a> = (Rc<Mmap>, &'a [f16]);
     type ReaderType<'a> = Vec<f32>;
     type WriterType<'a> = &'a mut [f16];
+    type ReaderTypeA<'a> = TVec<f32, SHAPE>;
+    type WriterTypeA<'a> = &'a mut [f16];
 }
 
-impl<'a, SHAPE: IsTensor> TReader<f32, SHAPE>
+impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE>
     for Tensor<'a, false, f32, SHAPE, MmapStore<f32, f16, true>>
+where
+    for<'c> TVec<f32, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
 {
-    type Reader<'b> = Vec<f32> where Self: 'b;
-    fn reader<'c>(&'c self) -> Self::Reader<'c> {
-        self.store.1.iter().map(|&value| f32::from(value)).collect()
+    type Reader<'b> = TVec<f32, SHAPE> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TVec {
+            vec: self.store.1.iter().map(|&value| f32::from(value)).collect(),
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -274,9 +376,11 @@ impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for MmapStore<f32, f16, false> {
     type StoreType<'a> = (Rc<Mmap>, &'a [f16]);
     type ReaderType<'a> = &'a [f16];
     type WriterType<'a> = &'a mut [f16];
+    type ReaderTypeA<'a> = TSlice<'a, f16, SHAPE>;
+    type WriterTypeA<'a> = TSliceMut<'a, f16, SHAPE>;
 }
 
-impl<'a, T, const D0: usize, const D1: usize> Rowable<T, D0, D1, MmapStore<T, T>>
+impl<'a, T: Copy, const D0: usize, const D1: usize> Rowable<T, D0, D1, MmapStore<T, T>>
     for Tensor<'a, false, T, MATRIX<D0, D1>, MmapStore<T, T>>
 where
     T: 'a,
@@ -292,23 +396,6 @@ where
     }
 }
 
-impl<'a, T, SHAPE: IsVector + 'a, U> Index<usize> for Tensor<'a, false, T, SHAPE, MmapStore<T, U>>
-where
-    MmapStore<T, U>: TensorTypes<T, SHAPE>,
-    Self: TReader<T, SHAPE>,
-{
-    type Output = T;
-    fn index(&self, index: usize) -> &T {
-        let reader = self.reader();
-        let slice = reader.reading();
-        debug_assert!(index < SHAPE::n_elem());
-        unsafe {
-            let ptr = slice.as_ptr().add(index);
-            &*ptr
-        }
-    }
-}
-
 // SubStore ///////////////////////////////////////////////////////////////////
 pub struct SubStore<U, const RW: bool = false> {
     phantom: PhantomData<U>,
@@ -318,67 +405,98 @@ impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for SubStore<T, false> {
     type StoreType<'a> = &'a [T] where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = () where T: 'a;
+    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
+    type WriterTypeA<'a> = () where T: 'a;
 }
 
 impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for SubStore<T, true> {
     type StoreType<'a> = &'a mut [T] where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = &'a mut [T] where T: 'a;
+    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
+    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
 }
 
-impl<'a, T, SHAPE: IsTensor + 'a> TReader<T, SHAPE> for Tensor<'a, false, T, SHAPE, SubStore<T, false>> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader(&self) -> Self::Reader<'_> {
-        self.store
-    }
+impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for SubStore<f16> {
+    type StoreType<'a> = &'a [f16];
+    type ReaderType<'a> = &'a [f16];
+    type WriterType<'a> = &'a mut [f16];
+    type ReaderTypeA<'a> = TSlice<'a, f16, SHAPE>;
+    type WriterTypeA<'a> = TSliceMut<'a, f16, SHAPE>;
 }
 
-// impl<'a, T, SHAPE: IsTensor + 'a> TReader<T, SHAPE> for Tensor<'a, true, T, SHAPE, SubStore<T, true>> {
-//     type Reader<'b> = &'b [T] where Self: 'b;
-//     fn reader(&self) -> Self::Reader<'_> {
-//         self.store
-//     }
-// }
-
-// impl<'a, T: Copy, SHAPE: IsTensor + 'a> TWriter<T, SHAPE> for Tensor<'a, true, T, SHAPE, SubStore<T, true>> {
-//     type Writer<'b> = &'b mut [T] where Self: 'b;
-//     fn writer(&mut self) -> Self::Writer<'_> {
-//         self.store
-//     }
-// }
-
-impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for TensorMut<'a, T, SHAPE, SubStore<T, false>> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader(&self) -> &[T] {
-        self.store
-    }
-}
-
-impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for TensorMut<'a, T, SHAPE, SubStore<T, true>> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader(&self) -> &[T] {
-        self.store
-    }
-}
-
-impl<'a, T: Copy, SHAPE: IsTensor> TWriter<T, SHAPE>
-    for TensorMut<'a, T, SHAPE, SubStore<T, true>>
+impl<'a, T, SHAPE: IsTensor + Indexable> TReader<T, SHAPE>
+    for Tensor<'a, false, T, SHAPE, SubStore<T, false>>
+where
+    for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
 {
-    type Writer<'b> = &'b mut [T] where Self: 'b;
-    fn writer(&mut self) -> &mut [T] {
-        self.store
+    type Reader<'b> = TSlice<'b, T, SHAPE> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TSlice {
+            slice: self.store,
+            _phantom0: PhantomData,
+            _phantom1: PhantomData,
+        }
     }
 }
 
-impl<'a, T, SHAPE: IsVector + 'a> Index<usize> for Tensor<'a, false, T, SHAPE, SubStore<T>> {
-    type Output = T;
-    fn index(&self, index: usize) -> &T {
-        let reader = self.reader();
-        let slice = <&[T] as tensor::TRead<T>>::reading(&reader);
-        debug_assert!(index < SHAPE::n_elem());
-        unsafe {
-            let ptr = slice.as_ptr().add(index);
-            &*ptr
+impl<'a, T, SHAPE: IsTensor + Indexable> TReader<T, SHAPE>
+    for Tensor<'a, true, T, SHAPE, SubStore<T, true>>
+where
+    for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
+{
+    type Reader<'b> = TSlice<'b, T, SHAPE> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TSlice {
+            slice: self.store,
+            _phantom0: PhantomData,
+            _phantom1: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: Copy, SHAPE: IsTensor + Indexable> TWriter<T, SHAPE>
+    for Tensor<'a, true, T, SHAPE, SubStore<T, true>>
+where
+    for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
+    for<'c> TSliceMut<'c, T, SHAPE>: TSet<<SHAPE as Indexable>::IndexType, Output = T>,
+{
+    type Writer<'b> = TSliceMut<'b, T, SHAPE> where Self: 'b;
+    fn writer(&mut self) -> Self::Writer<'_> {
+        TSliceMut {
+            slice: self.store,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE, f16>
+    for Tensor<'a, false, f32, SHAPE, SubStore<f16, false>>
+where
+    SubStore<f16>: TensorTypes<f16, SHAPE>,
+    for<'c> TSlice<'c, f32, SHAPE, f16>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
+{
+    type Reader<'b> = TSlice<'b, f32, SHAPE, f16> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TSlice {
+            slice: self.store,
+            _phantom0: PhantomData,
+            _phantom1: PhantomData,
+        }
+    }
+}
+
+impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE>
+    for Tensor<'a, false, f32, SHAPE, SubStore<f16, false>>
+where
+    SubStore<f16>: TensorTypes<f16, SHAPE>,
+    for<'c> TVec<f32, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
+{
+    type Reader<'b> = TVec<f32, SHAPE> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TVec {
+            vec: self.store.iter().map(|&x| x.into()).collect(),
+            _phantom: PhantomData,
         }
     }
 }
@@ -392,29 +510,48 @@ impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for VecStore<T> {
     type StoreType<'a> = Vec<T> where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = &'a mut [T] where T: 'a;
+    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
+    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
 }
 
-impl<'a, T, SHAPE: IsTensor> TReader<T, SHAPE> for Tensor<'a, false, T, SHAPE, VecStore<T>> {
-    type Reader<'b> = &'b [T] where Self: 'b;
-    fn reader<'c>(&'c self) -> Self::Reader<'c> {
-        &self.store.as_slice()
+impl<'a, T, SHAPE: IsTensor + Indexable> TReader<T, SHAPE>
+    for Tensor<'a, false, T, SHAPE, VecStore<T>>
+where
+    for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
+{
+    type Reader<'b> = TSlice<'b, T, SHAPE> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TSlice {
+            slice: self.store.as_slice(),
+            _phantom0: PhantomData,
+            _phantom1: PhantomData,
+        }
     }
 }
 
 impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for VecStore<f16> {
     type StoreType<'a> = Vec<f16>;
     type ReaderType<'a> = &'a [f16];
-    type WriterType<'a> =();
+    type WriterType<'a> = ();
+    type ReaderTypeA<'a> = TSlice<'a, f16, SHAPE>;
+    type WriterTypeA<'a> = ();
 }
 
-impl<'a, SHAPE: IsTensor> TReader<f32, SHAPE> for Tensor<'a, false, f32, SHAPE, VecStore<f16>> {
-    type Reader<'b> = Vec<f32> where Self: 'b;
-    fn reader<'c>(&'c self) -> Self::Reader<'c> {
-        self.store.iter().map(|x| (*x).into()).collect()
+impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE>
+    for Tensor<'a, false, f32, SHAPE, VecStore<f16>>
+where
+    TVec<f32, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = f32>,
+{
+    type Reader<'b> = TVec<f32, SHAPE> where Self: 'b;
+    fn reader(&self) -> Self::Reader<'_> {
+        TVec {
+            vec: self.store.iter().map(|x| (*x).into()).collect(),
+            _phantom: PhantomData,
+        }
     }
 }
 
-impl<'a, T, const D0: usize, const D1: usize> Rowable<T, D0, D1, VecStore<T>>
+impl<'a, T: Copy, const D0: usize, const D1: usize> Rowable<T, D0, D1, VecStore<T>>
     for Tensor<'a, false, T, MATRIX<D0, D1>, VecStore<T>>
 where
     T: 'a,
@@ -430,22 +567,16 @@ where
     }
 }
 
-// TRead //////////////////////////////////////////////////////////////////////
-impl<'a, 'b, T> TRead<T> for &'b [T] {
-    fn reading(&self) -> &[T] {
-        self
-    }
-}
+impl<'a, const D0: usize, const D1: usize> Rowable<f32, D0, D1, VecStore<f16>>
+    for Tensor<'a, false, f32, MATRIX<D0, D1>, VecStore<f16>>
+{
+    type RowStoreType = SubStore<f16>;
+    type RowTensorType<'b> = Tensor<'b, false, f32, VECTOR<D0>, SubStore<f16>> where Self: 'b;
 
-impl<'a, 'b, T> TRead<T> for Vec<T> {
-    fn reading(&self) -> &[T] {
-        self.as_slice()
-    }
-}
-
-// TWrite /////////////////////////////////////////////////////////////////////
-impl<'a: 'b, 'b, T: Copy> TWrite<T> for &'b mut [T] {
-    fn writing(&mut self) -> &mut [T] {
-        self
+    fn row<'b>(&'b self, i: usize) -> Self::RowTensorType<'b> {
+        debug_assert!(i < D1);
+        Tensor {
+            store: &self.store.as_slice()[i * D0..(i + 1) * D0],
+        }
     }
 }
