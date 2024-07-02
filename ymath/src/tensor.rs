@@ -219,17 +219,15 @@ pub struct Tensor<'a, const RW: bool, T: 'a, SHAPE: IsTensor, U: TensorTypes<T, 
 pub trait Rowable<T, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
     type RowStoreType: TensorTypes<T, V<D0>>;
     type RowTensorType<'a>: TReader<T, V<D0>>
-    where
-        Self: 'a;
+    where Self: 'a;
     fn row<'a>(&'a self, i: usize) -> Self::RowTensorType<'a>;
 }
 
-pub trait RowableMut<T: Copy, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>> {
+pub trait RowableMut<T: Copy, const D0: usize, const D1: usize, S: TensorTypes<T, M<D0, D1>>>
+{
     type RowStoreType: TensorTypes<T, V<D0>>;
-    type RowTensorType<'a>: TWriter<T, V<D0>>
-    where
-        Self: 'a;
-    fn row<'a>(&'a mut self, i: usize) -> Self::RowTensorType<'a>;
+    type RowTensorType<'b>: TWriter<T, V<D0>> where Self: 'b;
+    fn row<'b>(&'b mut self, i: usize) -> Self::RowTensorType<'b>;
 }
 
 pub type VectorImm<'a, T, const D0: usize, U> = Tensor<'a, false, T, VECTOR<D0>, U>;
@@ -239,8 +237,8 @@ pub type Tensor2Imm<'a, T, const D0: usize, const D1: usize, U> =
 // TensorMut //////////////////////////////////////////////////////////////////
 type TensorMut<'a, T, SHAPE, U = VecStore<T>> = Tensor<'a, true, T, SHAPE, U>;
 
-pub type VectorMut<'a, T, const D0: usize> = TensorMut<'a, T, VECTOR<D0>>;
-pub type Tensor2Mut<'a, T, const D0: usize, const D1: usize> = TensorMut<'a, T, MATRIX<D0, D1>>;
+pub type VectorMut<'a, T, const D0: usize, U = VecStore<T>> = TensorMut<'a, T, VECTOR<D0>, U>;
+pub type Tensor2Mut<'a, T, const D0: usize, const D1: usize, U = VecStore<T>> = TensorMut<'a, T, MATRIX<D0, D1>, U>;
 
 impl<'a, T: Copy, const D0: usize> TReader<T, V<D0>> for TensorMut<'a, T, V<D0>> {
     type Reader<'b> = TSlice<'b, T, V<D0>> where Self: 'b;

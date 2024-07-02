@@ -2,10 +2,11 @@ use num_traits::float::Float;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use ymath::function::max;
-use ymath::tensor::VectorMut;
+use ymath::tensor::{TWriter, TensorTypes, VectorMut};
 
-pub trait Initializable<D> {
-    fn initialize(description: &D, name: &str) -> Self;
+pub trait InitTensor<C, T, SHAPE, U: TensorTypes<T, SHAPE>> {
+    type Output<'a> where T: 'a;
+    fn init<'b>(context: C, name: &str) -> Self::Output<'b>;
 }
 
 pub trait LLM<'a, T: Float, TK: Copy, M, const EMBED: usize, const VOCAB: usize>: Sized

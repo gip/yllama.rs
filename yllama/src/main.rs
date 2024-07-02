@@ -9,11 +9,21 @@ use half::f16;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::str;
+use num_traits::float::Float;
 
 use llama::Llama;
-use llm::LLM;
+use llm::{InitTensor, LLM};
 use yloader::{load_build, load_fast};
-use ymath::tensor::{MmapStore, VecStore};
+use ymath::tensor::{MmapStore, Tensor, TensorTypes, VecStore, V};
+
+impl<'a, T: Float, const D0: usize, X> InitTensor<(), T, V<D0>, VecStore<T>> for X {
+    type Output<'b> = Tensor<'b, true, T, V<D0>, VecStore<T>>
+    where T: 'b;
+    fn init<'b>(_: (), name : &str) -> Self::Output<'b> where T: 'b {
+        println!("Init Vector {}!!", name);
+        Tensor::<true, T, V<D0>, VecStore<T>>::new()
+    }
+}
 
 unsafe fn process(
     path: &str,
