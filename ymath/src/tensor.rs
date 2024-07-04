@@ -237,7 +237,7 @@ pub type Tensor2Imm<'a, T, const D0: usize, const D1: usize, U> =
     Tensor<'a, false, T, MATRIX<D0, D1>, U>;
 
 // TensorMut //////////////////////////////////////////////////////////////////
-type TensorMut<'a, T, SHAPE, U = VecStore<T>> = Tensor<'a, true, T, SHAPE, U>;
+pub type TensorMut<'a, T, SHAPE, U = VecStore<T>> = Tensor<'a, true, T, SHAPE, U>;
 
 pub type VectorMut<'a, T, const D0: usize> = TensorMut<'a, T, VECTOR<D0>>;
 pub type Tensor2Mut<'a, T, const D0: usize, const D1: usize> = TensorMut<'a, T, MATRIX<D0, D1>>;
@@ -289,14 +289,14 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TWriter<T, M<D0, D1>>
 }
 
 impl<'a, T: Float, const D0: usize> VectorMut<'a, T, D0> {
-    pub fn new() -> Self {
+    pub fn new_vector() -> Self {
         let vec = vec![T::zero(); D0];
         VectorMut { store: vec }
     }
 }
 
 impl<'a, T: Float, const D0: usize, const D1: usize> Tensor2Mut<'a, T, D0, D1> {
-    pub fn new() -> Self {
+    pub fn new_matrix() -> Self {
         let vec = vec![T::zero(); D0 * D1];
         TensorMut { store: vec }
     }

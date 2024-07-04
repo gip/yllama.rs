@@ -1,4 +1,6 @@
-use crate::llm::LLM;
+use std::marker::PhantomData;
+
+use crate::llm::{Initializable, Instantiable, LLM};
 use anyhow::anyhow;
 use num_traits::float::Float;
 use tokenizers::tokenizer::Tokenizer;
@@ -7,6 +9,14 @@ use ymath::function::{acc, cp, matmul, rmsnorm, softmax};
 use ymath::tensor::*;
 
 type DefaultMmap = MmapStore<f32, f32>;
+
+trait MM<'a, T, const D0: usize, const D1: usize>
+where
+    Self: TensorTypes<T, M<D0, D1>> + Sized,
+    Tensor<'a, false, T, M<D0, D1>, Self>: TReader<T, M<D0, D1>> + 'a,
+    GGUFTensor<()>: Tensorify<'a, T, M<D0, D1>, Self, &'a ModelFile>
+{}
+
 
 #[derive(Debug, Clone, Copy)]
 struct LlamaParams<U, T = usize> {
@@ -27,6 +37,7 @@ struct LlamaParams<U, T = usize> {
 #[allow(dead_code)]
 pub struct Llama<
     'a,
+    TA,
     T: Float,
     TokenEmbd = DefaultMmap,
     Output = DefaultMmap,
@@ -63,6 +74,7 @@ pub struct Llama<
     blocks: Vec<
         LlamaBlock<
             'a,
+            TA,
             T,
             AttnK,
             AttnQ,
@@ -86,9 +98,14 @@ pub struct Llama<
     tokenizer: Tokenizer,
 }
 
+
+// LlamaBlock
+
+
 #[allow(dead_code)]
 struct LlamaBlock<
     'a,
+    TA,
     T: Float,
     AttnK,
     AttnQ,
@@ -138,10 +155,174 @@ struct LlamaBlock<
     k_cache: Tensor2Mut<'a, T, KV, EMBED>,
     v_cache: Tensor2Mut<'a, T, KV, EMBED>,
     attn_score: Tensor2Mut<'a, T, CONTEXT, KV>,
+
+    phantom: PhantomData<TA>,
 }
 
 impl<
         'a,
+        TA,
+        T: Float,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+        const EMBED: usize,
+        const VOCAB: usize,
+        const FF: usize,
+        const KV: usize,
+        const CONTEXT: usize,
+    > Instantiable<TA, (&'a ModelFile, usize, LlamaParams<T>)> for
+    LlamaBlock<
+        'a,
+        TA,
+        T,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+        EMBED,
+        VOCAB,
+        FF,
+        KV,
+        CONTEXT,
+    >
+where
+
+    AttnQ: MM<'a, T, EMBED, EMBED>,
+
+    // AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
+    // Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>> + 'a,
+    // GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
+
+    AttnK: TensorTypes<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
+    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnK, &'a ModelFile>,
+
+    AttnV: TensorTypes<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
+    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnV, &'a ModelFile>,
+
+    AttnNorm: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
+    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, AttnNorm, &'a ModelFile>,
+
+    AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
+    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnOutput, &'a ModelFile>,
+
+    FfnUp: TensorTypes<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
+    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnUp, &'a ModelFile>,
+
+    FfnDown: TensorTypes<T, M<FF, EMBED>>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
+    GGUFTensor<()>: Tensorify<'a, T, M<FF, EMBED>, FfnDown, &'a ModelFile>,
+
+    FfnNorm: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
+    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, FfnNorm, &'a ModelFile>,
+
+    FfnGate: TensorTypes<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
+    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
+
+    Tensor<'a, true, T, V<EMBED>, VecStore<T>>: Instantiable<TA, ()>,
+    Tensor<'a, true, T, V<FF>, VecStore<T>>: Instantiable<TA, ()>,
+    Tensor<'a, true, T, M<KV, EMBED>, VecStore<T>>: Instantiable<TA, ()>,
+    Tensor<'a, true, T, M<CONTEXT, KV>, VecStore<T>>: Instantiable<TA, ()>,
+{
+    fn instantiate((model, i, params): (&'a ModelFile, usize, LlamaParams<T>))
+      -> Result<Self, anyhow::Error>
+    {
+
+        macro_rules! build_tensor {
+            ($s:expr) => {{
+                let name = format!($s, i);
+                model
+                    .tensors
+                    .get(&name)
+                    .ok_or_else(|| anyhow!("tensor {} not found", name))
+                    .map(|x| x.to_tensor(model))
+                    .unwrap()
+                    .unwrap()
+            }};
+        }
+
+        macro_rules! build_tensor_mut {
+            ($s:expr) => {{
+                let name = format!($s, i);
+                model
+                    .tensors
+                    .get(&name)
+                    .ok_or_else(|| anyhow!("tensor {} not found", name))
+                    .map(|x| x.to_tensor_mut(model))
+                    .unwrap()
+                    .unwrap()
+            }};
+        }
+
+        // Attention
+        let attn_q = build_tensor!("blk.{}.attn_q.weight");
+        let attn_k = build_tensor!("blk.{}.attn_k.weight");
+        let attn_v = build_tensor!("blk.{}.attn_v.weight");
+        let attn_norm = build_tensor!("blk.{}.attn_norm.weight");
+        let attn_ouput = build_tensor!("blk.{}.attn_output.weight");
+
+        // Forward network
+        let ffn_down = build_tensor!("blk.{}.ffn_down.weight");
+        let ffn_up = build_tensor!("blk.{}.ffn_up.weight");
+        let ffn_norm = build_tensor!("blk.{}.ffn_norm.weight");
+        let ffn_gate = build_tensor!("blk.{}.ffn_gate.weight");
+
+        // Mutable
+        let xb = Instantiable::instantiate(())?;
+        let xb2 = Instantiable::instantiate(())?;
+        let hb = Instantiable::instantiate(())?;
+        let hb2 = Instantiable::instantiate(())?;
+        let q = Instantiable::instantiate(())?;
+        let k_cache = Instantiable::instantiate(())?;
+        let v_cache = Instantiable::instantiate(())?;
+        let attn_score = Instantiable::instantiate(())?;
+
+        Ok(LlamaBlock {
+            i,
+            params,
+            attn_q,
+            attn_k,
+            attn_v,
+            attn_norm,
+            attn_ouput,
+            ffn_down,
+            ffn_gate,
+            ffn_norm,
+            ffn_up,
+            xb,
+            xb2,
+            hb,
+            hb2,
+            q,
+            k_cache,
+            v_cache,
+            attn_score,
+            phantom: PhantomData,
+        })
+    }
+}
+
+impl<
+        'a,
+        TA,
         T: Float,
         AttnK,
         AttnQ,
@@ -160,6 +341,7 @@ impl<
     >
     LlamaBlock<
         'a,
+        TA,
         T,
         AttnK,
         AttnQ,
@@ -213,66 +395,6 @@ where
     Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
 {
-    fn new(model: &'a ModelFile, i: usize, params: LlamaParams<T>) -> Result<Self, anyhow::Error> {
-        macro_rules! build_tensor {
-            ($s:expr) => {{
-                let name = format!($s, i);
-                model
-                    .tensors
-                    .get(&name)
-                    .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor(model))
-                    .unwrap()
-                    .unwrap()
-            }};
-        }
-
-        // Attention
-        let attn_q = build_tensor!("blk.{}.attn_q.weight");
-        let attn_k = build_tensor!("blk.{}.attn_k.weight");
-        let attn_v = build_tensor!("blk.{}.attn_v.weight");
-        let attn_norm = build_tensor!("blk.{}.attn_norm.weight");
-        let attn_ouput = build_tensor!("blk.{}.attn_output.weight");
-
-        // Forward network
-        let ffn_down = build_tensor!("blk.{}.ffn_down.weight");
-        let ffn_up = build_tensor!("blk.{}.ffn_up.weight");
-        let ffn_norm = build_tensor!("blk.{}.ffn_norm.weight");
-        let ffn_gate = build_tensor!("blk.{}.ffn_gate.weight");
-
-        // Mutable
-        let xb = VectorMut::new();
-        let xb2 = VectorMut::new();
-        let hb = VectorMut::new();
-        let hb2 = VectorMut::new();
-        let q = VectorMut::new();
-        let k_cache = Tensor2Mut::new();
-        let v_cache = Tensor2Mut::new();
-        let attn_score = Tensor2Mut::new();
-
-        Ok(LlamaBlock {
-            i,
-            params,
-            attn_q,
-            attn_k,
-            attn_v,
-            attn_norm,
-            attn_ouput,
-            ffn_down,
-            ffn_gate,
-            ffn_norm,
-            ffn_up,
-            xb,
-            xb2,
-            hb,
-            hb2,
-            q,
-            k_cache,
-            v_cache,
-            attn_score,
-        })
-    }
-
     #[inline(always)]
     unsafe fn forward(&mut self, x: &mut VectorMut<T, EMBED>, pos: usize) {
         let xb = &mut self.xb;
@@ -415,6 +537,7 @@ fn conv_err(b: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::
 impl<
         'a,
         T: Float,
+        TA,
         TokenEmbd,
         Output,
         OutputNorm,
@@ -431,9 +554,11 @@ impl<
         const VOCAB: usize,
         const FF: usize,
         const KV: usize,
-    >
+        const CONTEXT: usize,
+    > Instantiable<TA, (&'a ModelFile, &str)> for
     Llama<
         'a,
+        TA,
         T,
         TokenEmbd,
         Output,
@@ -451,6 +576,7 @@ impl<
         VOCAB,
         FF,
         KV,
+        CONTEXT,
     >
 where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
@@ -497,8 +623,13 @@ where
 
     OutputNorm: TensorTypes<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, OutputNorm, &'a ModelFile>,
+
+    Tensor<'a, true, T, V<EMBED>, VecStore<T>>: Instantiable<TA, ()>,
+    Tensor<'a, true, T, V<FF>, VecStore<T>>: Instantiable<TA, ()>,
+    Tensor<'a, true, T, M<KV, EMBED>, VecStore<T>>: Instantiable<TA, ()>,
+    Tensor<'a, true, T, M<CONTEXT, KV>, VecStore<T>>: Instantiable<TA, ()>,
 {
-    fn new(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
+    fn instantiate((model, tokenizer_path): (&'a ModelFile, &str)) -> Result<Self, anyhow::Error> {
         let header = &model.header;
 
         // Huggingface tokenizer
@@ -552,7 +683,7 @@ where
 
         let blocks: Result<Vec<_>, anyhow::Error> = (0..params.block_count)
             .into_iter()
-            .map(|i| LlamaBlock::new(&model, i, params))
+            .map(|i| LlamaBlock::instantiate((&model, i, params)))
             .collect();
 
         let blocks = blocks?;
@@ -571,6 +702,8 @@ where
 
 impl<
         'a,
+        TA,
+        CTX,
         T: Float,
         TokenEmbd,
         Output,
@@ -588,9 +721,10 @@ impl<
         const VOCAB: usize,
         const FF: usize,
         const KV: usize,
-    > LLM<'a, T, u32, ModelFile, EMBED, VOCAB>
+    > LLM<'a, TA, CTX, T, u32, ModelFile, EMBED, VOCAB>
     for Llama<
         'a,
+        TA,
         T,
         TokenEmbd,
         Output,
@@ -610,6 +744,8 @@ impl<
         KV,
     >
 where
+    Llama<'a, TA, T, TokenEmbd, Output, OutputNorm, AttnK, AttnQ, AttnV, AttnNorm, FfnDown, FfnGate, FfnNorm, FfnUp, AttnOutput, EMBED, VOCAB, FF, KV>: Instantiable<TA, CTX>,
+
     AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
     Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
@@ -659,9 +795,9 @@ where
     Tensor<'a, false, T, V<EMBED>, OutputNorm>: TReader<T, V<EMBED>>,
     GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, OutputNorm, &'a ModelFile>,
 {
-    fn build<'b>(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
-        Ok(Llama::new(&model, tokenizer_path)?)
-    }
+    // fn build<'b>(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
+    //     Ok(Llama::new(&model, tokenizer_path)?)
+    // }
 
     fn block_count(&self) -> usize {
         self.params.block_count
@@ -692,7 +828,7 @@ where
 
     unsafe fn logits(&mut self, logits: &mut VectorMut<T, VOCAB>, x: &mut VectorMut<T, EMBED>) {
         // Final rmsnorm
-        let mut x2: VectorMut<T, EMBED> = VectorMut::new();
+        let mut x2: VectorMut<T, EMBED> = VectorMut::new_vector();
         rmsnorm(
             &mut x2,
             x,

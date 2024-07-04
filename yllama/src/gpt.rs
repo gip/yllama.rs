@@ -1,4 +1,4 @@
-use crate::llm::LLM;
+use crate::llm::{Instantiable, LLM};
 use anyhow::*;
 use yloader::*;
 use ymath::tensor::*;
@@ -7,16 +7,10 @@ type ModelDescription<'a> = ModelFile;
 
 pub struct Gpt {}
 
-impl<'a, const EMBED: usize, const VOCAB: usize>
-    LLM<'a, f32, u32, ModelDescription<'a>, EMBED, VOCAB> for Gpt
+impl<'a, TA, CTX, const EMBED: usize, const VOCAB: usize>
+    LLM<'a, TA, CTX, f32, u32, ModelDescription<'a>, EMBED, VOCAB> for Gpt
+where Gpt: Instantiable<TA, CTX>
 {
-    fn build<'b>(
-        _model: &'a ModelDescription,
-        _tokenizer_path: &str,
-    ) -> Result<Self, anyhow::Error> {
-        unimplemented!()
-    }
-
     fn block_count(&self) -> usize {
         unimplemented!()
     }

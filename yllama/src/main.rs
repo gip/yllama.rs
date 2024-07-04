@@ -3,6 +3,7 @@ pub mod llama;
 pub use gpt::Gpt;
 pub mod llm;
 
+use num_traits::float::Float;
 use anyhow::anyhow;
 use clap::Parser;
 use half::f16;
@@ -11,11 +12,25 @@ use rand::{Rng, SeedableRng};
 use std::str;
 
 use llama::Llama;
-use llm::LLM;
+use llm::{LLM, Instantiable};
 use yloader::{load_build, load_fast};
-use ymath::tensor::{MmapStore, VecStore};
+use ymath::tensor::*;
 
-unsafe fn process(
+pub struct VIRTALMEM; // Basically MacOS, Linux, Windows
+
+impl<'a, T: Float, const D0: usize, const D1: usize> Instantiable<VIRTALMEM, ()> for Tensor<'a, true, T, M<D0, D1>, VecStore<T>> {
+    fn instantiate(_: ()) -> Result<Self, anyhow::Error> where Self: Sized {
+        Ok(TensorMut::new_matrix())
+    }
+}
+
+impl<'a, T: Float, const D0: usize> Instantiable<VIRTALMEM, ()> for Tensor<'a, true, T, V<D0>, VecStore<T>> {
+    fn instantiate(_: ()) -> Result<Self, anyhow::Error> where Self: Sized {
+        Ok(TensorMut::new_vector())
+    }
+}
+
+fn process(
     path: &str,
     tokenizer_path: &str,
     prompt: &str,
@@ -30,21 +45,20 @@ unsafe fn process(
         "llama" => {
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
-            // type B = MmapStore<f32, f16>;
-            // type C = VecStore<f32>;
+            type B = MmapStore<f32, f16>;
+            type C = VecStore<f32>;
             type D = VecStore<f16>;
             let typ = llama::llama_find_type(&model)?;
-            // This is UGLY - TODO: improve on it!
             match typ {
                 "F16" => {
-                    type LlamaType<'a> = Llama<'a, f32, D, D, A, D, D, D, A, D, D, A, D, D>;
-                    let mut runnable: LlamaType = LLM::build(&model, tokenizer_path)?;
-                    runnable.run(prompt)
+                    type LlamaType<'a> = Llama<'a, VIRTALMEM, f32, D, D, C, D, D, D, C, D, D, C, D, D>;
+                    let mut runnable: LlamaType = Llama::instantiate((&model, tokenizer_path))?;
+                    unsafe { runnable.run(prompt) }
                 }
                 "F32" => {
                     // type LlamaType<'a> = Llama<'a, f32, C, C, C, C, C, C, C, C, C, C, C, C>;
-                    let mut runnable: Llama<f32> = LLM::build(&model, tokenizer_path)?;
-                    runnable.run(prompt)
+                    let mut runnable: Llama<VIRTALMEM, f32> = Llama::instantiate((&model, tokenizer_path))?;
+                    unsafe { runnable.run(prompt) }
                 }
                 _ => Err(anyhow!("Unknown configuration").into()),
             }
@@ -94,7 +108,7 @@ fn main() {
 
     let _r: f32 = rng.gen_range(0.0..1.0);
 
-    let result = unsafe { process(&args.file, &args.tokenizer, &args.prompt, args.clone) };
+    let result = process(&args.file, &args.tokenizer, &args.prompt, args.clone);
 
     match result {
         Err(e) => {
