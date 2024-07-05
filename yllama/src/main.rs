@@ -3,30 +3,206 @@ pub mod llama;
 pub use gpt::Gpt;
 pub mod llm;
 
-use num_traits::float::Float;
 use anyhow::anyhow;
 use clap::Parser;
 use half::f16;
+use num_traits::float::Float;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::str;
 
-use llama::Llama;
-use llm::{LLM, Instantiable};
-use yloader::{load_build, load_fast};
+use llama::{Llama, LlamaParams};
+use llm::{Instantiable, LLM};
+use yloader::*;
+use yloader::{load_build, load_fast, ModelFile};
 use ymath::tensor::*;
 
-pub struct VIRTALMEM; // Basically MacOS, Linux, Windows
+pub struct VIRTUALMEM; // Basically MacOS, Linux, Windows
 
-impl<'a, T: Float, const D0: usize, const D1: usize> Instantiable<VIRTALMEM, ()> for Tensor<'a, true, T, M<D0, D1>, VecStore<T>> {
-    fn instantiate(_: ()) -> Result<Self, anyhow::Error> where Self: Sized {
+impl<'a, T: Float, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (usize, String)>
+    for Tensor<'a, true, T, M<D0, D1>, VecStore<T>>
+{
+    fn instantiate(_: (usize, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
         Ok(TensorMut::new_matrix())
     }
 }
 
-impl<'a, T: Float, const D0: usize> Instantiable<VIRTALMEM, ()> for Tensor<'a, true, T, V<D0>, VecStore<T>> {
-    fn instantiate(_: ()) -> Result<Self, anyhow::Error> where Self: Sized {
+impl<'a, T: Float, const D0: usize> Instantiable<VIRTUALMEM, (usize, String)>
+    for Tensor<'a, true, T, V<D0>, VecStore<T>>
+{
+    fn instantiate(_: (usize, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
         Ok(TensorMut::new_vector())
+    }
+}
+
+impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+    for Tensor<'a, false, f32, V<D0>, VecStore<f32>>
+{
+    fn instantiate((model, name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+    for Tensor<'a, false, f32, M<D0, D1>, VecStore<f32>>
+{
+    fn instantiate((model, name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
+    for Tensor<'a, false, f32, V<D0>, VecStore<f32>>
+{
+    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let name = name.replace("{}", &i.to_string());
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
+    for Tensor<'a, false, f32, M<D0, D1>, VecStore<f32>>
+{
+    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let name = name.replace("{}", &i.to_string());
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
+    for Tensor<'a, false, f32, M<D0, D1>, VecStore<f16>>
+{
+    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let name = name.replace("{}", &i.to_string());
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+    for Tensor<'a, false, f32, M<D0, D1>, VecStore<f16>>
+{
+    fn instantiate((model, name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
+    for Tensor<'a, false, f32, M<D0, D1>, MmapStore<f32, f32>>
+{
+    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let name = name.replace("{}", &i.to_string());
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+    for Tensor<'a, false, f32, M<D0, D1>, MmapStore<f32, f32>>
+{
+    fn instantiate((model, name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+    for Tensor<'a, false, f32, V<D0>, MmapStore<f32, f32>>
+{
+    fn instantiate((model, name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
+    for Tensor<'a, false, f32, V<D0>, MmapStore<f32, f32>>
+{
+    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let name = name.replace("{}", &i.to_string());
+        let t = model.tensors.get(&name).expect("Tensor not found");
+        Ok(t.to_tensor(model)
+            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+    }
+}
+
+impl Instantiable<VIRTUALMEM, &ModelFile> for LlamaParams<f32> {
+    fn instantiate(model: &ModelFile) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        let header = &model.header;
+        let embedding_length = header_find_usize(header, "llama.embedding_length")?;
+        let attention_head_count_kv = header_find_usize(header, "llama.attention.head_count_kv")?;
+        let attention_head_count = header_find_usize(header, "llama.attention.head_count")?;
+        let params: LlamaParams<f32> = LlamaParams {
+            block_count: header_find_usize(header, "llama.block_count")?,
+            _context_length: header_find_usize(header, "llama.context_length")?,
+            embedding_length,
+            feed_forward_length: header_find_usize(header, "llama.feed_forward_length")?,
+            attention_head_count,
+            attention_head_count_kv,
+            attention_layer_norm_rms_epsilon: header_find_f32(
+                header,
+                "llama.attention.layer_norm_rms_epsilon",
+            )?,
+            rope_freq_base: header_find_f32(header, "llama.rope.freq_base")?,
+            _rope_dimension_count: header_find_usize(header, "llama.rope.dimension_count")?,
+            vocab_size: header_find_usize(header, "llama.vocab_size")?,
+            _max_seq_len: header_find_usize(header, "llama.context_length")?,
+            _attention_kv_length: embedding_length * attention_head_count_kv / attention_head_count,
+        };
+        Ok(params)
     }
 }
 
@@ -45,19 +221,69 @@ fn process(
         "llama" => {
             let model = load_build(path, gguf)?;
             type A = MmapStore<f32, f32>;
-            type B = MmapStore<f32, f16>;
+            //type B = MmapStore<f32, f16>;
             type C = VecStore<f32>;
             type D = VecStore<f16>;
             let typ = llama::llama_find_type(&model)?;
+            const EMBED: usize = 4096;
+            const VOCAB: usize = 128256;
+            const FF: usize = 14336;
+            const KV: usize = 1024;
+            const CONTEXT: usize = 2048;
             match typ {
                 "F16" => {
-                    type LlamaType<'a> = Llama<'a, VIRTALMEM, f32, D, D, C, D, D, D, C, D, D, C, D, D>;
+                    type LlamaType<'a> = Llama<
+                        'a,
+                        VIRTUALMEM,
+                        ModelFile,
+                        f32,
+                        D,
+                        D,
+                        C,
+                        D,
+                        D,
+                        D,
+                        C,
+                        D,
+                        D,
+                        C,
+                        D,
+                        D,
+                        EMBED,
+                        VOCAB,
+                        FF,
+                        KV,
+                        CONTEXT,
+                    >;
                     let mut runnable: LlamaType = Llama::instantiate((&model, tokenizer_path))?;
                     unsafe { runnable.run(prompt) }
                 }
                 "F32" => {
-                    // type LlamaType<'a> = Llama<'a, f32, C, C, C, C, C, C, C, C, C, C, C, C>;
-                    let mut runnable: Llama<VIRTALMEM, f32> = Llama::instantiate((&model, tokenizer_path))?;
+                    type LlamaType<'a> = Llama<
+                        'a,
+                        VIRTUALMEM,
+                        ModelFile,
+                        f32,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        A,
+                        EMBED,
+                        VOCAB,
+                        FF,
+                        KV,
+                        CONTEXT,
+                    >;
+                    let mut runnable: LlamaType =
+                        Instantiable::instantiate((&model, tokenizer_path))?;
                     unsafe { runnable.run(prompt) }
                 }
                 _ => Err(anyhow!("Unknown configuration").into()),

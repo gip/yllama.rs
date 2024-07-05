@@ -4,24 +4,18 @@ use std::fmt::Debug;
 use ymath::function::max;
 use ymath::tensor::VectorMut;
 
-pub trait Initializable<D> {
-    fn initialize(description: &D, name: &str) -> Self;
-}
-
 pub trait Instantiable<TA, CTX> {
-    fn instantiate(_: CTX) -> Result<Self, anyhow::Error> where Self: Sized;
+    fn instantiate(_: CTX) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized;
 }
 
-pub trait LLM<'a, TA, CTX, T: Float, TK: Copy, M, const EMBED: usize, const VOCAB: usize>: Sized
+pub trait LLM<'a, TA, T: Float, TK: Copy, M, const EMBED: usize, const VOCAB: usize>:
+    Sized
 where
     usize: TryInto<TK>,
     <usize as TryInto<TK>>::Error: Debug,
-    Self: Instantiable<TA, CTX>,
 {
-    // fn build(model: &'a M, tokenizer_path: &str) -> Result<Self, anyhow::Error>
-    // where
-    //     Self: Sized;
-
     fn block_count(&self) -> usize;
 
     fn encode(&self, input: &str) -> Result<Vec<TK>, Box<dyn std::error::Error>>;
