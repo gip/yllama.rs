@@ -67,48 +67,6 @@ impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFi
     }
 }
 
-impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
-    for Tensor<'a, false, f32, V<D0>, VecStore<f32>>
-{
-    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
-    where
-        Self: Sized,
-    {
-        let name = name.replace("{}", &i.to_string());
-        let t = model.tensors.get(&name).expect("Tensor not found");
-        Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
-    }
-}
-
-impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
-    for Tensor<'a, false, f32, M<D0, D1>, VecStore<f32>>
-{
-    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
-    where
-        Self: Sized,
-    {
-        let name = name.replace("{}", &i.to_string());
-        let t = model.tensors.get(&name).expect("Tensor not found");
-        Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
-    }
-}
-
-impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
-    for Tensor<'a, false, f32, M<D0, D1>, VecStore<f16>>
-{
-    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
-    where
-        Self: Sized,
-    {
-        let name = name.replace("{}", &i.to_string());
-        let t = model.tensors.get(&name).expect("Tensor not found");
-        Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
-    }
-}
-
 impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
     for Tensor<'a, false, f32, M<D0, D1>, VecStore<f16>>
 {
@@ -116,20 +74,6 @@ impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFi
     where
         Self: Sized,
     {
-        let t = model.tensors.get(&name).expect("Tensor not found");
-        Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
-    }
-}
-
-impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
-    for Tensor<'a, false, f32, M<D0, D1>, MmapStore<f32, f32>>
-{
-    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
-    where
-        Self: Sized,
-    {
-        let name = name.replace("{}", &i.to_string());
         let t = model.tensors.get(&name).expect("Tensor not found");
         Ok(t.to_tensor(model)
             .map_err(|_| anyhow!("GGUF tensor import error"))?)
@@ -162,17 +106,26 @@ impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
     }
 }
 
-impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, usize, String)>
-    for Tensor<'a, false, f32, V<D0>, MmapStore<f32, f32>>
+impl<'a, T: Float, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+    for Tensor<'a, true, T, V<D0>, VecStore<T>>
 {
-    fn instantiate((model, i, name): (&'a ModelFile, usize, String)) -> Result<Self, anyhow::Error>
+    fn instantiate((_model, _name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
     where
         Self: Sized,
     {
-        let name = name.replace("{}", &i.to_string());
-        let t = model.tensors.get(&name).expect("Tensor not found");
-        Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+        Ok(Tensor::new_vector())
+    }
+}
+
+impl<'a, T: Float, const D0: usize, const D1: usize>
+    Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+    for Tensor<'a, true, T, M<D0, D1>, VecStore<T>>
+{
+    fn instantiate((_model, _name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized,
+    {
+        Ok(Tensor::new_matrix())
     }
 }
 

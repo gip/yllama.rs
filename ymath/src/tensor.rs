@@ -455,13 +455,43 @@ where
     }
 }
 
-impl<'a, T: Copy, SHAPE: IsTensor + Indexable> TWriter<T, SHAPE>
-    for Tensor<'a, true, T, SHAPE, SubStore<T, true>>
+// impl<'a, T: Copy, SHAPE: IsTensor + Indexable> TWriter<T, SHAPE>
+//     for Tensor<'a, true, T, SHAPE, SubStore<T, true>>
+// where
+//     for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
+//     for<'c> TSliceMut<'c, T, SHAPE>: TSet<<SHAPE as Indexable>::IndexType, Output = T>,
+// {
+//     type Writer<'b> = TSliceMut<'b, T, SHAPE> where Self: 'b;
+//     fn writer(&mut self) -> Self::Writer<'_> {
+//         TSliceMut {
+//             slice: self.store,
+//             _phantom: PhantomData,
+//         }
+//     }
+// }
+
+impl<'a, T: Copy, const D0: usize> TWriter<T, V<D0>>
+    for Tensor<'a, true, T, V<D0>, SubStore<T, true>>
 where
-    for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
-    for<'c> TSliceMut<'c, T, SHAPE>: TSet<<SHAPE as Indexable>::IndexType, Output = T>,
+    for<'c> TSlice<'c, T, V<D0>>: TGet<<V<D0> as Indexable>::IndexType, Output = T>,
+    for<'c> TSliceMut<'c, T, V<D0>>: TSet<<V<D0> as Indexable>::IndexType, Output = T>,
 {
-    type Writer<'b> = TSliceMut<'b, T, SHAPE> where Self: 'b;
+    type Writer<'b> = TSliceMut<'b, T, V<D0>> where Self: 'b;
+    fn writer(&mut self) -> Self::Writer<'_> {
+        TSliceMut {
+            slice: self.store,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TWriter<T, M<D0, D1>>
+    for Tensor<'a, true, T, M<D0, D1>, SubStore<T, true>>
+where
+    for<'c> TSlice<'c, T, M<D0, D1>>: TGet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
+    for<'c> TSliceMut<'c, T, M<D0, D1>>: TSet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
+{
+    type Writer<'b> = TSliceMut<'b, T, M<D0, D1>> where Self: 'b;
     fn writer(&mut self) -> Self::Writer<'_> {
         TSliceMut {
             slice: self.store,
