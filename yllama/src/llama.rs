@@ -488,7 +488,7 @@ where
         + RowableMut<T, CONTEXT, KV, AttnScore>,
 {
     #[inline(always)]
-    unsafe fn forward(&mut self, x: &mut VectorMut<T, EMBED>, pos: usize) {
+    pub unsafe fn forward(&mut self, x: &mut VectorMut<T, EMBED>, pos: usize) {
         let xb = &mut self.xb;
         let xb2 = &mut self.xb2;
         let hb = &mut self.hb;

@@ -1,5 +1,7 @@
 use crate::*;
+use std::cell::{Ref, RefCell, RefMut};
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 // Shape traits ///////////////////////////////////////////////////////////////
 pub trait IsTensor {
@@ -178,6 +180,7 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TSet<(usize, usize)>
     }
 }
 
+// TVec
 pub struct TVec<T, SHAPE: IsTensor> {
     vec: Vec<T>,
     _phantom: PhantomData<SHAPE>,
@@ -210,6 +213,20 @@ pub trait TWriter<T: Copy, SHAPE: IsTensor + Indexable>: TReader<T, SHAPE> {
         Self: 'b;
     fn writer<'a>(&'a mut self) -> Self::Writer<'a>;
 }
+
+// // TCell
+// pub struct TCell<T, SHAPE: IsTensor> {
+//     offset: usize,
+//     vec: RefCell<Vec<T>>,
+//     _phantom: PhantomData<SHAPE>,
+// }
+
+// impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)> for TCell<T, M<D0, D1>> {
+//     type Output = T;
+//     fn get(&self, (i, j): (usize, usize)) -> Self::Output {
+//         self.vec[i * D0 + j]
+//     }
+// }
 
 // Tensor /////////////////////////////////////////////////////////////////////
 pub struct Tensor<'a, const RW: bool, T: 'a, SHAPE: IsTensor, U: TensorTypes<T, SHAPE>> {
@@ -396,6 +413,176 @@ where
     }
 }
 
+// RefStore ///////////////////////////////////////////////////////////////////
+pub struct RefStore<'a, T> {
+    store: (usize, &'a RefCell<Vec<T>>),
+    phantom: PhantomData<T>,
+}
+
+impl<'b, T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for RefStore<'b, T> {
+    type StoreType<'a> = (usize, &'a RefCell<Vec<T>>) where T: 'a;
+    type ReaderType<'a> =() where T: 'a;
+    type WriterType<'a> = () where T: 'a;
+    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
+    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
+}
+
+pub struct TCell<'a, T, SHAPE> {
+    cell: Ref<'a, Vec<T>>,
+    offset: usize,
+    _phantom: PhantomData<SHAPE>,
+}
+
+pub struct TCellMut<'a, T, SHAPE> {
+    cell: RefMut<'a, Vec<T>>,
+    offset: usize,
+    _phantom: PhantomData<SHAPE>,
+}
+
+impl<'a, T, const D0: usize> Indexable for TCell<'a, T, V<D0>> {
+    type IndexType = usize;
+}
+
+impl<'b, T: Float, const RW: bool, const D0: usize> TReader<T, V<D0>>
+    for Tensor<'b, RW, T, V<D0>, RefStore<'b, T>>
+where
+//for<'c> TCell<'c, T, V<D0>>: TGet<<V<D0> as Indexable>::IndexType, Output = T>,
+{
+    type Reader<'a> = TCell<'a, T, V<D0>> where Self: 'a,  T: 'a;
+    fn reader(&self) -> Self::Reader<'_> {
+        let (offset, cell) = self.store;
+        let cell = cell.borrow();
+        //let v = cell.deref();
+        TCell {
+            cell,
+            offset: 0,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'b, T: Float, const RW: bool, const D0: usize> TWriter<T, V<D0>>
+    for Tensor<'b, RW, T, V<D0>, RefStore<'b, T>>
+where
+//for<'c> TCell<'c, T, V<D0>>: TSet<<V<D0> as Indexable>::IndexType, Output = T>,
+//for<'c> TCellMut<'c, T, V<D0>>: TSet<<V<D0> as Indexable>::IndexType, Output = T>,
+{
+    type Writer<'a> = TCellMut<'a, T, V<D0>> where Self: 'a,  T: 'a;
+    fn writer(&mut self) -> Self::Writer<'_> {
+        let (offset, cell) = self.store;
+        let cell = cell.borrow_mut();
+        //let v = cell.deref();
+        TCellMut {
+            cell,
+            offset: 0,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'b, T: Float, const RW: bool, const D0: usize, const D1: usize> TReader<T, M<D0, D1>>
+    for Tensor<'b, RW, T, M<D0, D1>, RefStore<'b, T>>
+where
+//for<'c> TCell<'c, T, M<D0, D1>>: TGet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
+{
+    type Reader<'a> = TCell<'a, T, M<D0, D1>> where Self: 'a,  T: 'a;
+    fn reader(&self) -> Self::Reader<'_> {
+        let (offset, cell) = self.store;
+        let cell = cell.borrow();
+        //let v = cell.deref();
+        TCell {
+            cell,
+            offset: 0,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'b, T: Float, const RW: bool, const D0: usize, const D1: usize> TWriter<T, M<D0, D1>>
+    for Tensor<'b, RW, T, M<D0, D1>, RefStore<'b, T>>
+where
+//for<'c> TCell<'c, T, M<D0, D1>>: TGet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
+//for<'c> TCellMut<'c, T, M<D0, D1>>: TGet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
+{
+    type Writer<'a> = TCellMut<'a, T, M<D0, D1>> where Self: 'a,  T: 'a;
+    fn writer(&mut self) -> Self::Writer<'_> {
+        let (offset, cell) = self.store;
+        let cell = cell.borrow_mut();
+        //let v = cell.deref();
+        TCellMut {
+            cell,
+            offset: 0,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: Copy, const D0: usize> TGet<usize> for TCell<'a, T, V<D0>> {
+    type Output = T;
+    fn get(&self, index: usize) -> Self::Output {
+        let x = self.cell.deref();
+        x[index]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize> TGet<usize> for TCellMut<'a, T, V<D0>> {
+    type Output = T;
+    fn get(&self, index: usize) -> Self::Output {
+        let x = self.cell.deref();
+        x[index]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize> TSet<usize> for TCellMut<'a, T, V<D0>> {
+    fn set(&mut self, index: usize, val: T) {
+        let x = self.cell.deref_mut();
+        x[index] = val;
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
+    for TCell<'a, T, M<D0, D1>>
+{
+    type Output = T;
+    fn get(&self, (i, j): (usize, usize)) -> Self::Output {
+        let x = self.cell.deref();
+        x[self.offset + i * D0 + j]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
+    for TCellMut<'a, T, M<D0, D1>>
+{
+    type Output = T;
+    fn get(&self, (i, j): (usize, usize)) -> Self::Output {
+        let x = self.cell.deref();
+        x[self.offset + i * D0 + j]
+    }
+}
+
+impl<'a, T: Copy, const D0: usize, const D1: usize> TSet<(usize, usize)>
+    for TCellMut<'a, T, M<D0, D1>>
+{
+    fn set(&mut self, (i, j): (usize, usize), val: T) {
+        let x = self.cell.deref_mut();
+        x[self.offset + i * D0 + j] = val;
+    }
+}
+
+impl<'a, T: Float, const D0: usize, const D1: usize> RowableMut<T, D0, D1, RefStore<'a, T>>
+    for Tensor<'a, true, T, MATRIX<D0, D1>, RefStore<'a, T>>
+{
+    type RowStoreType = RefStore<'a, T>;
+    type RowTensorType<'c> = Tensor<'a, true, T, V<D0>, RefStore<'a, T>> where Self: 'c;
+    fn row<'b>(&'b mut self, i: usize) -> Self::RowTensorType<'b> {
+        let (offset, cell) = self.store;
+        assert!(offset == 0);
+        Tensor {
+            store: (offset + i * D0, cell),
+        }
+    }
+}
+
 // SubStore ///////////////////////////////////////////////////////////////////
 pub struct SubStore<U, const RW: bool = false> {
     phantom: PhantomData<U>,
@@ -454,21 +641,6 @@ where
         }
     }
 }
-
-// impl<'a, T: Copy, SHAPE: IsTensor + Indexable> TWriter<T, SHAPE>
-//     for Tensor<'a, true, T, SHAPE, SubStore<T, true>>
-// where
-//     for<'c> TSlice<'c, T, SHAPE>: TGet<<SHAPE as Indexable>::IndexType, Output = T>,
-//     for<'c> TSliceMut<'c, T, SHAPE>: TSet<<SHAPE as Indexable>::IndexType, Output = T>,
-// {
-//     type Writer<'b> = TSliceMut<'b, T, SHAPE> where Self: 'b;
-//     fn writer(&mut self) -> Self::Writer<'_> {
-//         TSliceMut {
-//             slice: self.store,
-//             _phantom: PhantomData,
-//         }
-//     }
-// }
 
 impl<'a, T: Copy, const D0: usize> TWriter<T, V<D0>>
     for Tensor<'a, true, T, V<D0>, SubStore<T, true>>
