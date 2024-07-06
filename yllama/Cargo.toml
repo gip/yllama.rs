@@ -6,8 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 clap = { version = "4.5.4", features = ["derive"] }
-rand = "0.8.5"
-tokenizers = "0.19.1"
+tokenizers = { version = "0.19.1", default-features = false, features = ["unstable_wasm"] }
 half = { version = "2.4.1", features = ["num-traits"] }
 num-traits = "0.2.19"
 serde = { version = "1.0", features = ["derive"] }

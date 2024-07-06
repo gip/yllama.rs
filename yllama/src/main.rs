@@ -7,8 +7,6 @@ use anyhow::anyhow;
 use clap::Parser;
 use half::f16;
 use num_traits::float::Float;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 use std::str;
 
 use llama::{Llama, LlamaParams};
@@ -279,13 +277,6 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-
-    let mut rng = match args.seed {
-        Some(n) => StdRng::seed_from_u64(n),
-        None => StdRng::from_entropy(),
-    };
-
-    let _r: f32 = rng.gen_range(0.0..1.0);
 
     let result = process(&args.file, &args.tokenizer, &args.prompt, args.clone);
 
