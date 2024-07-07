@@ -3,5 +3,6 @@ members = [
   "yloader",
   "yllama",
   "ymath",
+  "ymain",
 ]
 resolver = "2"

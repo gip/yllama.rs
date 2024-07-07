@@ -1,16 +1,11 @@
-pub mod gpt;
-pub mod llama;
-pub use gpt::Gpt;
-pub mod llm;
-
 use anyhow::anyhow;
 use clap::Parser;
 use half::f16;
 use num_traits::float::Float;
 use std::str;
 
-use llama::{Llama, LlamaParams};
-use llm::{Instantiable, LLM};
+use yllama::llama::{Llama, LlamaParams};
+use yllama::llm::{Instantiable, LLM};
 use yloader::*;
 use yloader::{load_build, load_fast, ModelFile};
 use ymath::tensor::*;
@@ -175,7 +170,7 @@ fn process(
             //type B = MmapStore<f32, f16>;
             type C = VecStore<f32>;
             type D = VecStore<f16>;
-            let typ = llama::llama_find_type(&model)?;
+            let typ = yllama::llama::llama_find_type(&model)?;
             const EMBED: usize = 4096;
             const VOCAB: usize = 128256;
             const FF: usize = 14336;

@@ -415,6 +415,7 @@ where
 
 // RefStore ///////////////////////////////////////////////////////////////////
 pub struct RefStore<'a, T> {
+    #[allow(dead_code)]
     store: (usize, &'a RefCell<Vec<T>>),
     phantom: PhantomData<T>,
 }
