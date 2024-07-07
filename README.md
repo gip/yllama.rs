@@ -3,13 +3,16 @@
 The idea was to work on a non-trivial implementation to learn a bit of Rust and get back into coding after years of engineering management. Project was timeboxed to a few days. Inspired by [llama.cpp](https://github.com/ggerganov/llama.cpp), I set the goal to deliver a Llama 3 8b inference implementation that could run on a modern laptop and could also be deployed to the Internet Computer (ICP). Was fun.
 
 ## Goals
+
 Functional goals
 * Llama 3 8b inference on laptop and ICP with maximum code reuse between the two targets - that also means that the code needed to be modular to be able to be deployed on ICP canisters
 * Learn transformers internals
 * Support [GGUF files](https://huggingface.co/docs/hub/en/gguf)
 * Support some form of model quantization
+
 Non-functional goals
 * Pure Rust as it is well supported to build on ICP
+* Explore how Rust handles mutability and in particular the [interior mutability pattern](https://doc.rust-lang.org/book/ch15-05-interior-mutability.html)
 * Built from scratch to maximize learning, so I didn't use any of [Candle](https://github.com/huggingface/candle)
 * No dynamic dispatch or checks during model execution - model statically built including for value initialization (I regretted that choice!)
 * Naive implementation, leaving optimization as a later act
