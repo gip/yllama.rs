@@ -38,7 +38,7 @@ To start:
 * Rust is a pretty neat language with great library and superior tooling and I _felt_ productive quickly (which doesn't mean I was)
 * The #beginners channel on The Rust Programming Language Discord was an amazing resoource
 * Typing in Rust is limited, cumbersome and verbose compared to Haskell and that slowed my down considerably at some point. A lot of typing decisions I took were probably wrong ([llama.rs](https://github.com/gip/yllama.rs/blob/main/yllama/src/llama.rs) is an eyesore!)
-* The inner matmul loops in both aarch64 and wasm are relatively well optimized out of the box in release mode (no SIMD though) - Rust optimizer seems adequate
+* The inner matmul loops for both arm64 and wasm are relatively well optimized out of the box in release mode (no SIMD though) - Rust optimizer seems adequate
 * Gpt and Claude were not really able to help much
 
 ## Reference

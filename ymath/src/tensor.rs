@@ -445,17 +445,14 @@ impl<'a, T, const D0: usize> Indexable for TCell<'a, T, V<D0>> {
 
 impl<'b, T: Float, const RW: bool, const D0: usize> TReader<T, V<D0>>
     for Tensor<'b, RW, T, V<D0>, RefStore<'b, T>>
-where
-//for<'c> TCell<'c, T, V<D0>>: TGet<<V<D0> as Indexable>::IndexType, Output = T>,
 {
     type Reader<'a> = TCell<'a, T, V<D0>> where Self: 'a,  T: 'a;
     fn reader(&self) -> Self::Reader<'_> {
         let (offset, cell) = self.store;
         let cell = cell.borrow();
-        //let v = cell.deref();
         TCell {
             cell,
-            offset: 0,
+            offset,
             _phantom: PhantomData,
         }
     }
@@ -463,18 +460,14 @@ where
 
 impl<'b, T: Float, const RW: bool, const D0: usize> TWriter<T, V<D0>>
     for Tensor<'b, RW, T, V<D0>, RefStore<'b, T>>
-where
-//for<'c> TCell<'c, T, V<D0>>: TSet<<V<D0> as Indexable>::IndexType, Output = T>,
-//for<'c> TCellMut<'c, T, V<D0>>: TSet<<V<D0> as Indexable>::IndexType, Output = T>,
 {
     type Writer<'a> = TCellMut<'a, T, V<D0>> where Self: 'a,  T: 'a;
     fn writer(&mut self) -> Self::Writer<'_> {
         let (offset, cell) = self.store;
         let cell = cell.borrow_mut();
-        //let v = cell.deref();
         TCellMut {
             cell,
-            offset: 0,
+            offset,
             _phantom: PhantomData,
         }
     }
@@ -482,17 +475,14 @@ where
 
 impl<'b, T: Float, const RW: bool, const D0: usize, const D1: usize> TReader<T, M<D0, D1>>
     for Tensor<'b, RW, T, M<D0, D1>, RefStore<'b, T>>
-where
-//for<'c> TCell<'c, T, M<D0, D1>>: TGet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
 {
     type Reader<'a> = TCell<'a, T, M<D0, D1>> where Self: 'a,  T: 'a;
     fn reader(&self) -> Self::Reader<'_> {
         let (offset, cell) = self.store;
         let cell = cell.borrow();
-        //let v = cell.deref();
         TCell {
             cell,
-            offset: 0,
+            offset,
             _phantom: PhantomData,
         }
     }
@@ -500,18 +490,14 @@ where
 
 impl<'b, T: Float, const RW: bool, const D0: usize, const D1: usize> TWriter<T, M<D0, D1>>
     for Tensor<'b, RW, T, M<D0, D1>, RefStore<'b, T>>
-where
-//for<'c> TCell<'c, T, M<D0, D1>>: TGet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
-//for<'c> TCellMut<'c, T, M<D0, D1>>: TGet<<M<D0, D1> as Indexable>::IndexType, Output = T>,
 {
     type Writer<'a> = TCellMut<'a, T, M<D0, D1>> where Self: 'a,  T: 'a;
     fn writer(&mut self) -> Self::Writer<'_> {
         let (offset, cell) = self.store;
         let cell = cell.borrow_mut();
-        //let v = cell.deref();
         TCellMut {
             cell,
-            offset: 0,
+            offset,
             _phantom: PhantomData,
         }
     }

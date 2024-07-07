@@ -551,7 +551,7 @@ where
                 let q_offset = h * attn_head_size;
                 for t in 0..(pos + 1) {
                     let mut score = T::zero();
-                    let mut qw = q.writer();
+                    let qw = q.writer();
                     let k = &mut self.k_cache.row(t);
                     let kw = k.writer();
                     let k_offset = (h / kv_mul) * attn_head_size;
