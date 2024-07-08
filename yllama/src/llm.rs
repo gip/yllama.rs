@@ -4,19 +4,18 @@ use std::fmt::Debug;
 use ymath::function::max;
 use ymath::tensor::VectorMut;
 
-pub trait Initializable<D> {
-    fn initialize(description: &D, name: &str) -> Self;
+pub trait Instantiable<TA, CTX> {
+    fn instantiate(_: CTX) -> Result<Self, anyhow::Error>
+    where
+        Self: Sized;
 }
 
-pub trait LLM<'a, T: Float, TK: Copy, M, const EMBED: usize, const VOCAB: usize>: Sized
+pub trait LLM<'a, TA, T: Float, TK: Copy, M, const EMBED: usize, const VOCAB: usize>:
+    Sized
 where
     usize: TryInto<TK>,
     <usize as TryInto<TK>>::Error: Debug,
 {
-    fn build(model: &'a M, tokenizer_path: &str) -> Result<Self, anyhow::Error>
-    where
-        Self: Sized;
-
     fn block_count(&self) -> usize;
 
     fn encode(&self, input: &str) -> Result<Vec<TK>, Box<dyn std::error::Error>>;
@@ -30,8 +29,8 @@ where
     unsafe fn run(&mut self, prompt: &str) -> Result<(), Box<dyn std::error::Error>> {
         let input = prompt;
         let tokens: Vec<TK> = self.encode(input)?;
-        let mut logits: VectorMut<T, VOCAB> = VectorMut::new();
-        let mut x: VectorMut<T, EMBED> = VectorMut::new();
+        let mut logits: VectorMut<T, VOCAB> = VectorMut::new_vector();
+        let mut x: VectorMut<T, EMBED> = VectorMut::new_vector();
         let mut next_token = tokens[0];
         let mut chat = vec![];
         for pos in 0..1024 {

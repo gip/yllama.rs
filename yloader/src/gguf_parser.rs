@@ -11,6 +11,7 @@ use nom::{bytes::streaming::tag, IResult};
 /// parse gguf string
 fn gguf_string(i: &[u8]) -> IResult<&[u8], String> {
     let (i, len) = le_u64(i)?;
+    let len = len as usize;
     let (i, data) = map_res(take(len), std::str::from_utf8)(i)?;
     Ok((i, data.to_string()))
 }

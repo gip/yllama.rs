@@ -1,4 +1,6 @@
-use crate::llm::LLM;
+use std::marker::PhantomData;
+
+use crate::llm::{Instantiable, LLM};
 use anyhow::anyhow;
 use num_traits::float::Float;
 use tokenizers::tokenizer::Tokenizer;
@@ -6,45 +8,53 @@ use yloader::*;
 use ymath::function::{acc, cp, matmul, rmsnorm, softmax};
 use ymath::tensor::*;
 
-type DefaultMmap = MmapStore<f32, f32>;
-
 #[derive(Debug, Clone, Copy)]
-struct LlamaParams<U, T = usize> {
-    block_count: T,
-    _context_length: T,
-    embedding_length: T,
-    feed_forward_length: T,
-    attention_head_count: T,
-    attention_head_count_kv: T,
-    attention_layer_norm_rms_epsilon: U,
-    rope_freq_base: U,
-    _rope_dimension_count: T,
-    vocab_size: T,
-    _max_seq_len: T,
-    _attention_kv_length: T,
+pub struct LlamaParams<U, T = usize> {
+    pub block_count: T,
+    pub _context_length: T,
+    pub embedding_length: T,
+    pub feed_forward_length: T,
+    pub attention_head_count: T,
+    pub attention_head_count_kv: T,
+    pub attention_layer_norm_rms_epsilon: U,
+    pub rope_freq_base: U,
+    pub _rope_dimension_count: T,
+    pub vocab_size: T,
+    pub _max_seq_len: T,
+    pub _attention_kv_length: T,
 }
 
 #[allow(dead_code)]
 pub struct Llama<
     'a,
+    TA,
+    D,
     T: Float,
-    TokenEmbd = DefaultMmap,
-    Output = DefaultMmap,
-    OutputNorm = DefaultMmap,
-    AttnK = DefaultMmap,
-    AttnQ = DefaultMmap,
-    AttnV = DefaultMmap,
-    AttnNorm = DefaultMmap,
-    FfnDown = DefaultMmap,
-    FfnGate = DefaultMmap,
-    FfnNorm = DefaultMmap,
-    FfnUp = DefaultMmap,
-    AttnOutput = DefaultMmap,
-    const EMBED: usize = 4096,
-    const VOCAB: usize = 128256,
-    const FF: usize = 14336,
-    const KV: usize = 1024,
-    const CONTEXT: usize = 2048,
+    TokenEmbd,
+    Output,
+    OutputNorm,
+    AttnK,
+    AttnQ,
+    AttnV,
+    AttnNorm,
+    FfnDown,
+    FfnGate,
+    FfnNorm,
+    FfnUp,
+    AttnOutput,
+    const EMBED: usize,
+    const VOCAB: usize,
+    const FF: usize,
+    const KV: usize,
+    const CONTEXT: usize,
+    Xb = VecStore<T>,
+    Xb2 = VecStore<T>,
+    Hb = VecStore<T>,
+    Hb2 = VecStore<T>,
+    Q = VecStore<T>,
+    KCache = VecStore<T>,
+    VCache = VecStore<T>,
+    AttnScore = VecStore<T>,
 > where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
     AttnK: TensorTypes<T, M<EMBED, KV>>,
@@ -58,11 +68,21 @@ pub struct Llama<
     TokenEmbd: TensorTypes<T, M<EMBED, VOCAB>>,
     Output: TensorTypes<T, M<EMBED, VOCAB>>,
     OutputNorm: TensorTypes<T, V<EMBED>>,
+    Xb: TensorTypes<T, V<EMBED>>,
+    Xb2: TensorTypes<T, V<EMBED>>,
+    Hb: TensorTypes<T, V<FF>>,
+    Hb2: TensorTypes<T, V<FF>>,
+    Q: TensorTypes<T, V<EMBED>>,
+    KCache: TensorTypes<T, M<KV, EMBED>>,
+    VCache: TensorTypes<T, M<KV, EMBED>>,
+    AttnScore: TensorTypes<T, M<CONTEXT, KV>>,
 {
     params: LlamaParams<T, usize>,
     blocks: Vec<
         LlamaBlock<
             'a,
+            TA,
+            D,
             T,
             AttnK,
             AttnQ,
@@ -78,6 +98,14 @@ pub struct Llama<
             FF,
             KV,
             CONTEXT,
+            Xb,
+            Xb2,
+            Hb,
+            Hb2,
+            Q,
+            KCache,
+            VCache,
+            AttnScore,
         >,
     >,
     token_embd: Tensor2Imm<'a, T, EMBED, VOCAB, TokenEmbd>,
@@ -86,9 +114,13 @@ pub struct Llama<
     tokenizer: Tokenizer,
 }
 
+// LlamaBlock
+
 #[allow(dead_code)]
-struct LlamaBlock<
+pub struct LlamaBlock<
     'a,
+    TA,
+    D,
     T: Float,
     AttnK,
     AttnQ,
@@ -104,6 +136,14 @@ struct LlamaBlock<
     const FF: usize,
     const KV: usize,
     const CONTEXT: usize,
+    Xb,
+    Xb2,
+    Hb,
+    Hb2,
+    Q,
+    KCache,
+    VCache,
+    AttnScore,
 > where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
     AttnK: TensorTypes<T, M<EMBED, KV>>,
@@ -114,6 +154,14 @@ struct LlamaBlock<
     FfnDown: TensorTypes<T, M<FF, EMBED>>,
     FfnNorm: TensorTypes<T, V<EMBED>>,
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
+    Xb: TensorTypes<T, V<EMBED>>,
+    Xb2: TensorTypes<T, V<EMBED>>,
+    Hb: TensorTypes<T, V<FF>>,
+    Hb2: TensorTypes<T, V<FF>>,
+    Q: TensorTypes<T, V<EMBED>>,
+    KCache: TensorTypes<T, M<KV, EMBED>>,
+    VCache: TensorTypes<T, M<KV, EMBED>>,
+    AttnScore: TensorTypes<T, M<CONTEXT, KV>>,
 {
     i: usize,
     params: LlamaParams<T>,
@@ -130,18 +178,23 @@ struct LlamaBlock<
     ffn_gate: Tensor2Imm<'a, T, EMBED, FF, FfnGate>,
 
     // Block state
-    xb: VectorMut<'a, T, EMBED>,
-    xb2: VectorMut<'a, T, EMBED>,
-    hb: VectorMut<'a, T, FF>,
-    hb2: VectorMut<'a, T, FF>,
-    q: VectorMut<'a, T, EMBED>,
-    k_cache: Tensor2Mut<'a, T, KV, EMBED>,
-    v_cache: Tensor2Mut<'a, T, KV, EMBED>,
-    attn_score: Tensor2Mut<'a, T, CONTEXT, KV>,
+    xb: Tensor<'a, true, T, V<EMBED>, Xb>,
+    xb2: Tensor<'a, true, T, V<EMBED>, Xb2>,
+    hb: Tensor<'a, true, T, V<FF>, Hb>,
+    hb2: Tensor<'a, true, T, V<FF>, Hb2>,
+    q: Tensor<'a, true, T, V<EMBED>, Q>,
+    k_cache: Tensor<'a, true, T, M<KV, EMBED>, KCache>,
+    v_cache: Tensor<'a, true, T, M<KV, EMBED>, VCache>,
+    attn_score: Tensor<'a, true, T, M<CONTEXT, KV>, AttnScore>,
+
+    phantom0: PhantomData<TA>,
+    phantom1: PhantomData<D>,
 }
 
 impl<
         'a,
+        TA,
+        D,
         T: Float,
         AttnK,
         AttnQ,
@@ -157,9 +210,19 @@ impl<
         const FF: usize,
         const KV: usize,
         const CONTEXT: usize,
-    >
-    LlamaBlock<
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
+    > Instantiable<TA, (&'a D, usize, LlamaParams<T>)>
+    for LlamaBlock<
         'a,
+        TA,
+        D,
         T,
         AttnK,
         AttnQ,
@@ -175,80 +238,105 @@ impl<
         FF,
         KV,
         CONTEXT,
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
     >
 where
     AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
-    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>> + 'a,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
 
     AttnK: TensorTypes<T, M<EMBED, KV>>,
-    Tensor<'a, false, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnK, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
 
     AttnV: TensorTypes<T, M<EMBED, KV>>,
-    Tensor<'a, false, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnV, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
 
     AttnNorm: TensorTypes<T, V<EMBED>>,
-    Tensor<'a, false, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, AttnNorm, &'a ModelFile>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
 
     AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
-    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnOutput, &'a ModelFile>,
-
-    FfnUp: TensorTypes<T, M<EMBED, FF>>,
-    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnUp, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
 
     FfnDown: TensorTypes<T, M<FF, EMBED>>,
-    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<FF, EMBED>, FfnDown, &'a ModelFile>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<FF, EMBED>>,
 
-    FfnNorm: TensorTypes<T, V<EMBED>>,
-    Tensor<'a, false, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, FfnNorm, &'a ModelFile>,
+    FfnUp: TensorTypes<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
 
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
-    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
-{
-    fn new(model: &'a ModelFile, i: usize, params: LlamaParams<T>) -> Result<Self, anyhow::Error> {
-        macro_rules! build_tensor {
-            ($s:expr) => {{
-                let name = format!($s, i);
-                model
-                    .tensors
-                    .get(&name)
-                    .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor(model))
-                    .unwrap()
-                    .unwrap()
-            }};
-        }
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
 
+    FfnNorm: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
+
+    Xb: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Xb2: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Hb: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Hb2: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Q: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Q>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    KCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, KCache>:
+        Instantiable<TA, (&'a D, String)> + TWriter<T, M<KV, EMBED>>,
+
+    VCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, VCache>:
+        Instantiable<TA, (&'a D, String)> + TWriter<T, M<KV, EMBED>>,
+
+    AttnScore: TensorTypes<T, M<CONTEXT, KV>>,
+    Tensor<'a, true, T, M<CONTEXT, KV>, AttnScore>:
+        Instantiable<TA, (&'a D, String)> + TWriter<T, M<CONTEXT, KV>>,
+{
+    fn instantiate(
+        (model, i, params): (&'a D, usize, LlamaParams<T>),
+    ) -> Result<Self, anyhow::Error> {
         // Attention
-        let attn_q = build_tensor!("blk.{}.attn_q.weight");
-        let attn_k = build_tensor!("blk.{}.attn_k.weight");
-        let attn_v = build_tensor!("blk.{}.attn_v.weight");
-        let attn_norm = build_tensor!("blk.{}.attn_norm.weight");
-        let attn_ouput = build_tensor!("blk.{}.attn_output.weight");
+        let attn_q = Instantiable::instantiate((model, format!("blk.{}.attn_q.weight", i)))?;
+        let attn_k = Instantiable::instantiate((model, format!("blk.{}.attn_k.weight", i)))?;
+        let attn_v = Instantiable::instantiate((model, format!("blk.{}.attn_v.weight", i)))?;
+        let attn_norm = Instantiable::instantiate((model, format!("blk.{}.attn_norm.weight", i)))?;
+        let attn_ouput =
+            Instantiable::instantiate((model, format!("blk.{}.attn_output.weight", i)))?;
 
         // Forward network
-        let ffn_down = build_tensor!("blk.{}.ffn_down.weight");
-        let ffn_up = build_tensor!("blk.{}.ffn_up.weight");
-        let ffn_norm = build_tensor!("blk.{}.ffn_norm.weight");
-        let ffn_gate = build_tensor!("blk.{}.ffn_gate.weight");
+        let ffn_down = Instantiable::instantiate((model, format!("blk.{}.ffn_down.weight", i)))?;
+        let ffn_up = Instantiable::instantiate((model, format!("blk.{}.ffn_up.weight", i)))?;
+        let ffn_norm = Instantiable::instantiate((model, format!("blk.{}.ffn_norm.weight", i)))?;
+        let ffn_gate = Instantiable::instantiate((model, format!("blk.{}.ffn_gate.weight", i)))?;
 
         // Mutable
-        let xb = VectorMut::new();
-        let xb2 = VectorMut::new();
-        let hb = VectorMut::new();
-        let hb2 = VectorMut::new();
-        let q = VectorMut::new();
-        let k_cache = Tensor2Mut::new();
-        let v_cache = Tensor2Mut::new();
-        let attn_score = Tensor2Mut::new();
+        let xb = Instantiable::instantiate((model, "xb".to_string()))?;
+        let xb2 = Instantiable::instantiate((model, "xb2".to_string()))?;
+        let hb = Instantiable::instantiate((model, "hb".to_string()))?;
+        let hb2 = Instantiable::instantiate((model, "hb2".to_string()))?;
+        let q = Instantiable::instantiate((model, "q".to_string()))?;
+        let k_cache = Instantiable::instantiate((model, "k_cache".to_string()))?;
+        let v_cache = Instantiable::instantiate((model, "v_cache".to_string()))?;
+        let attn_score = Instantiable::instantiate((model, "attn_score".to_string()))?;
 
         Ok(LlamaBlock {
             i,
@@ -270,11 +358,137 @@ where
             k_cache,
             v_cache,
             attn_score,
+            phantom0: PhantomData,
+            phantom1: PhantomData,
         })
     }
+}
 
+impl<
+        'a,
+        TA,
+        D: 'a,
+        T: Float,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+        const EMBED: usize,
+        const VOCAB: usize,
+        const FF: usize,
+        const KV: usize,
+        const CONTEXT: usize,
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
+    >
+    LlamaBlock<
+        'a,
+        TA,
+        D,
+        T,
+        AttnK,
+        AttnQ,
+        AttnV,
+        AttnNorm,
+        FfnDown,
+        FfnGate,
+        FfnNorm,
+        FfnUp,
+        AttnOutput,
+        EMBED,
+        VOCAB,
+        FF,
+        KV,
+        CONTEXT,
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
+    >
+where
+    AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
+
+    AttnK: TensorTypes<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
+
+    AttnV: TensorTypes<T, M<EMBED, KV>>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
+
+    AttnNorm: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
+
+    AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
+
+    FfnDown: TensorTypes<T, M<FF, EMBED>>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<FF, EMBED>>,
+
+    FfnUp: TensorTypes<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
+
+    FfnGate: TensorTypes<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
+
+    FfnNorm: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
+
+    Xb: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Xb2: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Hb: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Hb2: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Q: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Q>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    KCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, KCache>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<KV, EMBED>>
+        + RowableMut<T, KV, EMBED, KCache>,
+
+    VCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, VCache>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<KV, EMBED>>
+        + RowableMut<T, KV, EMBED, VCache>,
+
+    AttnScore: TensorTypes<T, M<CONTEXT, KV>>,
+    Tensor<'a, true, T, M<CONTEXT, KV>, AttnScore>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<CONTEXT, KV>>
+        + RowableMut<T, CONTEXT, KV, AttnScore>,
+{
     #[inline(always)]
-    unsafe fn forward(&mut self, x: &mut VectorMut<T, EMBED>, pos: usize) {
+    pub unsafe fn forward(&mut self, x: &mut VectorMut<T, EMBED>, pos: usize) {
         let xb = &mut self.xb;
         let xb2 = &mut self.xb2;
         let hb = &mut self.hb;
@@ -287,40 +501,44 @@ where
             self.params.attention_layer_norm_rms_epsilon,
         );
 
-        // q, v and k for this position
-        let q = &mut self.q;
-        let k = &mut self.k_cache.row(pos);
-        let v = &mut self.v_cache.row(pos);
-        matmul(q, &mut self.attn_q, xb);
-        matmul(k, &mut self.attn_k, xb);
-        matmul(v, &mut self.attn_v, xb);
-
-        let mut qw = q.writer();
-        let mut kw = k.writer();
-
-        // RoPE
         let attn_head_size = self.params.embedding_length / self.params.attention_head_count;
         let kv_mul = 4; // TODO: remove hardcoded
         debug_assert!(attn_head_size == 128);
-        for i in 0..self.params.attention_head_count {
-            for j in (0..attn_head_size).step_by(2) {
-                let freq = T::one()
-                    / T::powf(
-                        self.params.rope_freq_base,
-                        T::from(j).unwrap() / T::from(attn_head_size).unwrap(),
-                    );
-                let val = T::from(pos).unwrap() * freq;
-                let fcr = T::cos(val);
-                let fci = T::sin(val);
-                let q0 = qw.get(i * attn_head_size + j);
-                let q1 = qw.get(i * attn_head_size + j + 1);
-                qw.set(i * attn_head_size + j, q0 * fcr - q1 * fci);
-                qw.set(i * attn_head_size + j + 1, q0 * fci + q1 * fcr);
-                if i < self.params.attention_head_count_kv {
-                    let k0 = kw.get(i * attn_head_size + j);
-                    let k1 = kw.get(i * attn_head_size + j + 1);
-                    kw.set(i * attn_head_size + j, k0 * fcr - k1 * fci);
-                    kw.set(i * attn_head_size + j + 1, k0 * fci + k1 * fcr);
+
+        // q, v and k for this position
+        let q = &mut self.q;
+        {
+            let k = &mut self.k_cache.row(pos);
+            let v = &mut self.v_cache.row(pos);
+            matmul(q, &mut self.attn_q, xb);
+            matmul(k, &mut self.attn_k, xb);
+            matmul(v, &mut self.attn_v, xb);
+
+            //let mut qw = q.writer();
+            let mut qw = q.writer();
+            let mut kw = k.writer();
+
+            // RoPE
+            for i in 0..self.params.attention_head_count {
+                for j in (0..attn_head_size).step_by(2) {
+                    let freq = T::one()
+                        / T::powf(
+                            self.params.rope_freq_base,
+                            T::from(j).unwrap() / T::from(attn_head_size).unwrap(),
+                        );
+                    let val = T::from(pos).unwrap() * freq;
+                    let fcr = T::cos(val);
+                    let fci = T::sin(val);
+                    let q0 = qw.get(i * attn_head_size + j);
+                    let q1 = qw.get(i * attn_head_size + j + 1);
+                    qw.set(i * attn_head_size + j, q0 * fcr - q1 * fci);
+                    qw.set(i * attn_head_size + j + 1, q0 * fci + q1 * fcr);
+                    if i < self.params.attention_head_count_kv {
+                        let k0 = kw.get(i * attn_head_size + j);
+                        let k1 = kw.get(i * attn_head_size + j + 1);
+                        kw.set(i * attn_head_size + j, k0 * fcr - k1 * fci);
+                        kw.set(i * attn_head_size + j + 1, k0 * fci + k1 * fcr);
+                    }
                 }
             }
         }
@@ -333,6 +551,7 @@ where
                 let q_offset = h * attn_head_size;
                 for t in 0..(pos + 1) {
                     let mut score = T::zero();
+                    let qw = q.writer();
                     let k = &mut self.k_cache.row(t);
                     let kw = k.writer();
                     let k_offset = (h / kv_mul) * attn_head_size;
@@ -414,6 +633,8 @@ fn conv_err(b: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::
 
 impl<
         'a,
+        TA,
+        D,
         T: Float,
         TokenEmbd,
         Output,
@@ -431,9 +652,20 @@ impl<
         const VOCAB: usize,
         const FF: usize,
         const KV: usize,
-    >
-    Llama<
+        const CONTEXT: usize,
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
+    > Instantiable<TA, (&'a D, &str)>
+    for Llama<
         'a,
+        TA,
+        D,
         T,
         TokenEmbd,
         Output,
@@ -451,55 +683,99 @@ impl<
         VOCAB,
         FF,
         KV,
+        CONTEXT,
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
     >
 where
-    AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
-    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
+    AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
 
     AttnK: TensorTypes<T, M<EMBED, KV>>,
-    Tensor<'a, false, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnK, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
 
     AttnV: TensorTypes<T, M<EMBED, KV>>,
-    Tensor<'a, false, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnV, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
 
     AttnNorm: TensorTypes<T, V<EMBED>>,
-    Tensor<'a, false, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, AttnNorm, &'a ModelFile>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
 
     AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
-    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnOutput, &'a ModelFile>,
-
-    FfnUp: TensorTypes<T, M<EMBED, FF>>,
-    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnUp, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
 
     FfnDown: TensorTypes<T, M<FF, EMBED>>,
-    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<FF, EMBED>, FfnDown, &'a ModelFile>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<FF, EMBED>>,
 
-    FfnNorm: TensorTypes<T, V<EMBED>>,
-    Tensor<'a, false, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, FfnNorm, &'a ModelFile>,
+    FfnUp: TensorTypes<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
 
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
-    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
+
+    FfnNorm: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
+
+    Xb: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Xb2: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Hb: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Hb2: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Q: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Q>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    KCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, KCache>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<KV, EMBED>>
+        + RowableMut<T, KV, EMBED, KCache>,
+
+    VCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, VCache>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<KV, EMBED>>
+        + RowableMut<T, KV, EMBED, VCache>,
+
+    AttnScore: TensorTypes<T, M<CONTEXT, KV>>,
+    Tensor<'a, true, T, M<CONTEXT, KV>, AttnScore>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<CONTEXT, KV>>
+        + RowableMut<T, CONTEXT, KV, AttnScore>,
 
     TokenEmbd: TensorTypes<T, M<EMBED, VOCAB>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, VOCAB>, TokenEmbd, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, VOCAB>, TokenEmbd>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, VOCAB>>,
 
     Output: TensorTypes<T, M<EMBED, VOCAB>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, VOCAB>, Output, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, VOCAB>, Output>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, VOCAB>>,
 
     OutputNorm: TensorTypes<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, OutputNorm, &'a ModelFile>,
+    Tensor<'a, false, T, V<EMBED>, OutputNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
+
+    LlamaParams<T>: Instantiable<TA, &'a D>,
 {
-    fn new(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
-        let header = &model.header;
+    fn instantiate((model, tokenizer_path): (&'a D, &str)) -> Result<Self, anyhow::Error> {
+        //let header = &model.header;
 
         // Huggingface tokenizer
         // TODO: implement a local algorithm using using data in GGUF
@@ -508,51 +784,19 @@ where
             Err(err) => Err(anyhow!("could not create tokenizer: {}", err.to_string())),
         }?;
 
-        let embedding_length = header_find_usize(header, "llama.embedding_length")?;
-        let attention_head_count_kv = header_find_usize(header, "llama.attention.head_count_kv")?;
-        let attention_head_count = header_find_usize(header, "llama.attention.head_count")?;
-        let params: LlamaParams<T> = LlamaParams {
-            block_count: header_find_usize(header, "llama.block_count")?,
-            _context_length: header_find_usize(header, "llama.context_length")?,
-            embedding_length,
-            feed_forward_length: header_find_usize(header, "llama.feed_forward_length")?,
-            attention_head_count,
-            attention_head_count_kv,
-            attention_layer_norm_rms_epsilon: T::from(header_find_f32(
-                header,
-                "llama.attention.layer_norm_rms_epsilon",
-            )?)
-            .unwrap(),
-            rope_freq_base: T::from(header_find_f32(header, "llama.rope.freq_base")?).unwrap(),
-            _rope_dimension_count: header_find_usize(header, "llama.rope.dimension_count")?,
-            vocab_size: header_find_usize(header, "llama.vocab_size")?,
-            _max_seq_len: header_find_usize(header, "llama.context_length")?,
-            _attention_kv_length: embedding_length * attention_head_count_kv / attention_head_count,
-        };
+        let params: LlamaParams<T> = Instantiable::instantiate(model)?;
 
         if params.vocab_size != VOCAB {
             return Err(anyhow!("'llama.vocab_size' doesn't match the static value"));
         }
 
-        macro_rules! build_tensor {
-            ($s:expr) => {{
-                let name = $s;
-                model
-                    .tensors
-                    .get(name)
-                    .ok_or_else(|| anyhow!("tensor {} not found", name))
-                    .map(|x| x.to_tensor(model))?
-                    .unwrap()
-            }};
-        }
-
-        let token_embd = build_tensor!("token_embd.weight");
-        let output = build_tensor!("output.weight");
-        let output_norm = build_tensor!("output_norm.weight");
+        let token_embd = Instantiable::instantiate((model, "token_embd.weight".to_string()))?;
+        let output = Instantiable::instantiate((model, "output.weight".to_string()))?;
+        let output_norm = Instantiable::instantiate((model, "output_norm.weight".to_string()))?;
 
         let blocks: Result<Vec<_>, anyhow::Error> = (0..params.block_count)
             .into_iter()
-            .map(|i| LlamaBlock::new(&model, i, params))
+            .map(|i| LlamaBlock::instantiate((model, i, params)))
             .collect();
 
         let blocks = blocks?;
@@ -571,6 +815,8 @@ where
 
 impl<
         'a,
+        TA,
+        D: 'a,
         T: Float,
         TokenEmbd,
         Output,
@@ -588,9 +834,20 @@ impl<
         const VOCAB: usize,
         const FF: usize,
         const KV: usize,
-    > LLM<'a, T, u32, ModelFile, EMBED, VOCAB>
+        const CONTEXT: usize,
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
+    > LLM<'a, TA, T, u32, ModelFile, EMBED, VOCAB>
     for Llama<
         'a,
+        TA,
+        D,
         T,
         TokenEmbd,
         Output,
@@ -608,61 +865,96 @@ impl<
         VOCAB,
         FF,
         KV,
+        CONTEXT,
+        Xb,
+        Xb2,
+        Hb,
+        Hb2,
+        Q,
+        KCache,
+        VCache,
+        AttnScore,
     >
 where
-    AttnQ: TensorTypes<T, M<EMBED, EMBED>> + 'a,
-    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>: TReader<T, M<EMBED, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnQ, &'a ModelFile>,
+    AttnQ: TensorTypes<T, M<EMBED, EMBED>>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnQ>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
 
     AttnK: TensorTypes<T, M<EMBED, KV>>,
-    Tensor<'a, false, T, M<EMBED, KV>, AttnK>: TReader<T, M<EMBED, KV>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnK, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnK>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
 
     AttnV: TensorTypes<T, M<EMBED, KV>>,
-    Tensor<'a, false, T, M<EMBED, KV>, AttnV>: TReader<T, M<EMBED, KV>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, KV>, AttnV, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, KV>, AttnV>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, KV>>,
 
     AttnNorm: TensorTypes<T, V<EMBED>>,
-    Tensor<'a, false, T, V<EMBED>, AttnNorm>: TReader<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, AttnNorm, &'a ModelFile>,
+    Tensor<'a, false, T, V<EMBED>, AttnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
 
     AttnOutput: TensorTypes<T, M<EMBED, EMBED>>,
-    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>: TReader<T, M<EMBED, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, EMBED>, AttnOutput, &'a ModelFile>,
-
-    FfnUp: TensorTypes<T, M<EMBED, FF>>,
-    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>: TReader<T, M<EMBED, FF>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnUp, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, EMBED>, AttnOutput>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, EMBED>>,
 
     FfnDown: TensorTypes<T, M<FF, EMBED>>,
-    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>: TReader<T, M<FF, EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<FF, EMBED>, FfnDown, &'a ModelFile>,
+    Tensor<'a, false, T, M<FF, EMBED>, FfnDown>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<FF, EMBED>>,
 
-    FfnNorm: TensorTypes<T, V<EMBED>>,
-    Tensor<'a, false, T, V<EMBED>, FfnNorm>: TReader<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, FfnNorm, &'a ModelFile>,
+    FfnUp: TensorTypes<T, M<EMBED, FF>>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnUp>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
 
     FfnGate: TensorTypes<T, M<EMBED, FF>>,
-    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>: TReader<T, M<EMBED, FF>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, FF>, FfnGate, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, FF>, FfnGate>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, FF>>,
 
-    TokenEmbd: TensorTypes<T, M<EMBED, VOCAB>> + 'a,
-    Tensor<'a, false, T, M<EMBED, VOCAB>, TokenEmbd>:
-        TReader<T, M<EMBED, VOCAB>> + Rowable<T, EMBED, VOCAB, TokenEmbd>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, VOCAB>, TokenEmbd, &'a ModelFile>,
+    FfnNorm: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, false, T, V<EMBED>, FfnNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
+
+    Xb: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Xb2: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Xb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    Hb: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Hb2: TensorTypes<T, V<FF>>,
+    Tensor<'a, true, T, V<FF>, Hb2>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<FF>>,
+
+    Q: TensorTypes<T, V<EMBED>>,
+    Tensor<'a, true, T, V<EMBED>, Q>: Instantiable<TA, (&'a D, String)> + TWriter<T, V<EMBED>>,
+
+    KCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, KCache>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<KV, EMBED>>
+        + RowableMut<T, KV, EMBED, KCache>,
+
+    VCache: TensorTypes<T, M<KV, EMBED>>,
+    Tensor<'a, true, T, M<KV, EMBED>, VCache>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<KV, EMBED>>
+        + RowableMut<T, KV, EMBED, VCache>,
+
+    AttnScore: TensorTypes<T, M<CONTEXT, KV>>,
+    Tensor<'a, true, T, M<CONTEXT, KV>, AttnScore>: Instantiable<TA, (&'a D, String)>
+        + TWriter<T, M<CONTEXT, KV>>
+        + RowableMut<T, CONTEXT, KV, AttnScore>,
+
+    TokenEmbd: TensorTypes<T, M<EMBED, VOCAB>>,
+    Tensor<'a, false, T, M<EMBED, VOCAB>, TokenEmbd>: Instantiable<TA, (&'a D, String)>
+        + TReader<T, M<EMBED, VOCAB>>
+        + Rowable<T, EMBED, VOCAB, TokenEmbd>,
 
     Output: TensorTypes<T, M<EMBED, VOCAB>>,
-    Tensor<'a, false, T, M<EMBED, VOCAB>, Output>: TReader<T, M<EMBED, VOCAB>>,
-    GGUFTensor<()>: Tensorify<'a, T, M<EMBED, VOCAB>, Output, &'a ModelFile>,
+    Tensor<'a, false, T, M<EMBED, VOCAB>, Output>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, M<EMBED, VOCAB>>,
 
     OutputNorm: TensorTypes<T, V<EMBED>>,
-    Tensor<'a, false, T, V<EMBED>, OutputNorm>: TReader<T, V<EMBED>>,
-    GGUFTensor<()>: Tensorify<'a, T, V<EMBED>, OutputNorm, &'a ModelFile>,
+    Tensor<'a, false, T, V<EMBED>, OutputNorm>:
+        Instantiable<TA, (&'a D, String)> + TReader<T, V<EMBED>>,
 {
-    fn build<'b>(model: &'a ModelFile, tokenizer_path: &str) -> Result<Self, anyhow::Error> {
-        Ok(Llama::new(&model, tokenizer_path)?)
-    }
-
     fn block_count(&self) -> usize {
         self.params.block_count
     }
@@ -692,7 +984,7 @@ where
 
     unsafe fn logits(&mut self, logits: &mut VectorMut<T, VOCAB>, x: &mut VectorMut<T, EMBED>) {
         // Final rmsnorm
-        let mut x2: VectorMut<T, EMBED> = VectorMut::new();
+        let mut x2: VectorMut<T, EMBED> = VectorMut::new_vector();
         rmsnorm(
             &mut x2,
             x,
