@@ -992,7 +992,7 @@ where
             self.params.attention_layer_norm_rms_epsilon,
         );
         // Last act: logits
-        matmul(logits, &mut self.output, &mut x2);
+        matmul(logits, &self.output, &x2);
     }
 }
 

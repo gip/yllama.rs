@@ -88,7 +88,7 @@ pub fn cp<'a, T: Float, const D0: usize>(
     }
 }
 
-pub fn max<'a, T: 'a, const D0: usize>(x: &'a mut impl TReader<T, VECTOR<D0>>) -> (usize, T)
+pub fn max<'a, T: 'a, const D0: usize>(x: &'a impl TReader<T, VECTOR<D0>>) -> (usize, T)
 where
     T: Float,
 {

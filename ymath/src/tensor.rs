@@ -570,6 +570,20 @@ impl<'a, T: Float, const D0: usize, const D1: usize> RowableMut<T, D0, D1, RefSt
     }
 }
 
+impl<'a, T: Float, const D0: usize, const D1: usize> Rowable<T, D0, D1, RefStore<'a, T>>
+    for Tensor<'a, false, T, MATRIX<D0, D1>, RefStore<'a, T>>
+{
+    type RowStoreType = RefStore<'a, T>;
+    type RowTensorType<'c> = Tensor<'a, false, T, V<D0>, RefStore<'a, T>> where Self: 'c;
+    fn row<'b>(&'b self, i: usize) -> Self::RowTensorType<'b> {
+        let (offset, cell) = self.store;
+        assert!(offset == 0);
+        Tensor {
+            store: (offset + i * D0, cell),
+        }
+    }
+}
+
 // SubStore ///////////////////////////////////////////////////////////////////
 pub struct SubStore<U, const RW: bool = false> {
     phantom: PhantomData<U>,
