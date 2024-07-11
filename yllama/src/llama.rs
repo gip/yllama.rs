@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use num_traits::float::Float;
 use tokenizers::tokenizer::Tokenizer;
 use yloader::*;
-use ymath::function::{acc, cp, matmul, rmsnorm, softmax};
+use ymath::function::{acc, cp, rmsnorm, softmax, Matmul};
 use ymath::tensor::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -29,7 +29,7 @@ pub struct Llama<
     'a,
     TA,
     D,
-    T: Float,
+    T: Float + Matmul,
     TokenEmbd,
     Output,
     OutputNorm,
@@ -121,7 +121,7 @@ pub struct LlamaBlock<
     'a,
     TA,
     D,
-    T: Float,
+    T: Float + Matmul,
     AttnK,
     AttnQ,
     AttnV,
@@ -195,7 +195,7 @@ impl<
         'a,
         TA,
         D,
-        T: Float,
+        T: Float + Matmul,
         AttnK,
         AttnQ,
         AttnV,
@@ -368,7 +368,7 @@ impl<
         'a,
         TA,
         D: 'a,
-        T: Float,
+        T: Float + Matmul,
         AttnK,
         AttnQ,
         AttnV,
@@ -510,9 +510,9 @@ where
         {
             let k = &mut self.k_cache.row(pos);
             let v = &mut self.v_cache.row(pos);
-            matmul(q, &mut self.attn_q, xb);
-            matmul(k, &mut self.attn_k, xb);
-            matmul(v, &mut self.attn_v, xb);
+            Matmul::matmul(q, &mut self.attn_q, xb);
+            Matmul::matmul(k, &mut self.attn_k, xb);
+            Matmul::matmul(v, &mut self.attn_v, xb);
 
             //let mut qw = q.writer();
             let mut qw = q.writer();
@@ -592,7 +592,7 @@ where
         }
 
         // Output of attention
-        matmul(xb2, &mut self.attn_ouput, xb);
+        Matmul::matmul(xb2, &mut self.attn_ouput, xb);
 
         // Residual
         acc(x, xb2);
@@ -606,8 +606,8 @@ where
         );
 
         // Non-linearity
-        matmul(hb, &mut self.ffn_gate, xb);
-        matmul(hb2, &mut self.ffn_up, xb);
+        Matmul::matmul(hb, &mut self.ffn_gate, xb);
+        Matmul::matmul(hb2, &mut self.ffn_up, xb);
         {
             let mut hbw = hb.writer();
             let hb2w = hb2.writer();
@@ -620,7 +620,7 @@ where
         }
 
         // Ffn output
-        matmul(xb, &mut self.ffn_down, hb);
+        Matmul::matmul(xb, &mut self.ffn_down, hb);
 
         // Residual
         acc(x, xb);
@@ -635,7 +635,7 @@ impl<
         'a,
         TA,
         D,
-        T: Float,
+        T: Float + Matmul,
         TokenEmbd,
         Output,
         OutputNorm,
@@ -817,7 +817,7 @@ impl<
         'a,
         TA,
         D: 'a,
-        T: Float,
+        T: Float + Matmul,
         TokenEmbd,
         Output,
         OutputNorm,
@@ -992,7 +992,7 @@ where
             self.params.attention_layer_norm_rms_epsilon,
         );
         // Last act: logits
-        matmul(logits, &self.output, &x2);
+        Matmul::matmul(logits, &self.output, &x2);
     }
 }
 

@@ -508,6 +508,11 @@ impl<'a, T: Copy, const D0: usize> TGet<usize> for TCell<'a, T, V<D0>> {
     type Output = T;
     fn get(&self, index: usize) -> Self::Output {
         let x = self.cell.deref();
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *x.get_unchecked(index)
+        }
+        #[cfg(debug_assertions)]
         x[index]
     }
 }
@@ -516,6 +521,11 @@ impl<'a, T: Copy, const D0: usize> TGet<usize> for TCellMut<'a, T, V<D0>> {
     type Output = T;
     fn get(&self, index: usize) -> Self::Output {
         let x = self.cell.deref();
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *x.get_unchecked(index)
+        }
+        #[cfg(debug_assertions)]
         x[index]
     }
 }
@@ -523,7 +533,14 @@ impl<'a, T: Copy, const D0: usize> TGet<usize> for TCellMut<'a, T, V<D0>> {
 impl<'a, T: Copy, const D0: usize> TSet<usize> for TCellMut<'a, T, V<D0>> {
     fn set(&mut self, index: usize, val: T) {
         let x = self.cell.deref_mut();
-        x[index] = val;
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *x.get_unchecked_mut(index) = val
+        }
+        #[cfg(debug_assertions)]
+        {
+            x[index] = val
+        }
     }
 }
 
@@ -533,7 +550,13 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
     type Output = T;
     fn get(&self, (i, j): (usize, usize)) -> Self::Output {
         let x = self.cell.deref();
-        x[self.offset + i * D0 + j]
+        let index = self.offset + i * D0 + j;
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *x.get_unchecked(index)
+        }
+        #[cfg(debug_assertions)]
+        x[index]
     }
 }
 
@@ -543,7 +566,13 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TGet<(usize, usize)>
     type Output = T;
     fn get(&self, (i, j): (usize, usize)) -> Self::Output {
         let x = self.cell.deref();
-        x[self.offset + i * D0 + j]
+        let index = self.offset + i * D0 + j;
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *x.get_unchecked(index)
+        }
+        #[cfg(debug_assertions)]
+        x[index]
     }
 }
 
@@ -552,7 +581,15 @@ impl<'a, T: Copy, const D0: usize, const D1: usize> TSet<(usize, usize)>
 {
     fn set(&mut self, (i, j): (usize, usize), val: T) {
         let x = self.cell.deref_mut();
-        x[self.offset + i * D0 + j] = val;
+        let index = self.offset + i * D0 + j;
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            *x.get_unchecked_mut(index) = val
+        }
+        #[cfg(debug_assertions)]
+        {
+            x[index] = val
+        }
     }
 }
 

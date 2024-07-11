@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use clap::Parser;
 use half::f16;
-use num_traits::float::Float;
+use num_traits::Float;
 use std::str;
 
 use yllama::llama::{Llama, LlamaParams};
@@ -9,11 +9,12 @@ use yllama::llm::{Instantiable, LLM};
 use yloader::*;
 use yloader::{load_build, load_fast, ModelFile};
 use ymath::tensor::*;
+use ymath::Matmul;
 
 pub struct VIRTUALMEM; // Basically MacOS, Linux, Windows
 
-impl<'a, T: Float, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (usize, String)>
-    for Tensor<'a, true, T, M<D0, D1>, VecStore<T>>
+impl<'a, T: Float + Matmul, const D0: usize, const D1: usize>
+    Instantiable<VIRTUALMEM, (usize, String)> for Tensor<'a, true, T, M<D0, D1>, VecStore<T>>
 {
     fn instantiate(_: (usize, String)) -> Result<Self, anyhow::Error>
     where
@@ -23,7 +24,7 @@ impl<'a, T: Float, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (u
     }
 }
 
-impl<'a, T: Float, const D0: usize> Instantiable<VIRTUALMEM, (usize, String)>
+impl<'a, T: Float + Matmul, const D0: usize> Instantiable<VIRTUALMEM, (usize, String)>
     for Tensor<'a, true, T, V<D0>, VecStore<T>>
 {
     fn instantiate(_: (usize, String)) -> Result<Self, anyhow::Error>
@@ -99,7 +100,7 @@ impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
     }
 }
 
-impl<'a, T: Float, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
+impl<'a, T: Float + Matmul, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
     for Tensor<'a, true, T, V<D0>, VecStore<T>>
 {
     fn instantiate((_model, _name): (&'a ModelFile, String)) -> Result<Self, anyhow::Error>
@@ -110,7 +111,7 @@ impl<'a, T: Float, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, Str
     }
 }
 
-impl<'a, T: Float, const D0: usize, const D1: usize>
+impl<'a, T: Float + Matmul, const D0: usize, const D1: usize>
     Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
     for Tensor<'a, true, T, M<D0, D1>, VecStore<T>>
 {

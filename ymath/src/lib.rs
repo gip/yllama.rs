@@ -1,3 +1,5 @@
+#![feature(specialization)]
+
 pub mod tensor;
 pub mod function {
     pub use super::*;
@@ -29,20 +31,67 @@ pub fn softmax<T: Float, const D0: usize>(v: &mut impl TWriter<T, VECTOR<D0>>, s
     }
 }
 
-pub unsafe fn matmul<T: Float, const D0: usize, const D1: usize>(
-    v1: &mut impl TWriter<T, VECTOR<D1>>,
-    m0: &impl TReader<T, MATRIX<D0, D1>>,
-    v0: &impl TReader<T, VECTOR<D0>>,
-) {
-    let m0 = m0.reader();
-    let v0 = v0.reader();
-    let mut v1 = v1.writer();
-    for i in 0..D1 {
-        let mut r = T::zero();
-        for j in 0..D0 {
-            r = r + m0.get((i, j)) * v0.get(j);
+pub trait Matmul
+where
+    Self: Float,
+{
+    unsafe fn matmul<const D0: usize, const D1: usize>(
+        v1: &mut impl TWriter<Self, VECTOR<D1>>,
+        m0: &impl TReader<Self, MATRIX<D0, D1>>,
+        v0: &impl TReader<Self, VECTOR<D0>>,
+    );
+}
+
+impl<T: Float> Matmul for T {
+    default unsafe fn matmul<const D0: usize, const D1: usize>(
+        v1: &mut impl TWriter<Self, VECTOR<D1>>,
+        m0: &impl TReader<Self, MATRIX<D0, D1>>,
+        v0: &impl TReader<Self, VECTOR<D0>>,
+    ) {
+        let m0 = m0.reader();
+        let v0 = v0.reader();
+        let mut v1 = v1.writer();
+        for i in 0..D1 {
+            let mut r = Self::zero();
+            for j in 0..D0 {
+                r = r + m0.get((i, j)) * v0.get(j);
+            }
+            v1.set(i, r);
         }
-        v1.set(i, r);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Matmul for f32 {
+    #[target_feature(enable = "simd128")]
+    unsafe fn matmul<const D0: usize, const D1: usize>(
+        v1: &mut impl TWriter<f32, VECTOR<D1>>,
+        m0: &impl TReader<f32, MATRIX<D0, D1>>,
+        v0: &impl TReader<f32, VECTOR<D0>>,
+    ) {
+        use std::arch::wasm32::*;
+
+        let m0 = m0.reader();
+        let v0 = v0.reader();
+        let mut v1 = v1.writer();
+        for i in 0..D1 {
+            let mut r = f32x4(0.0, 0.0, 0.0, 0.0);
+            for j in (0..D0).step_by(4) {
+                let a = f32x4(
+                    m0.get((i, j + 0)),
+                    m0.get((i, j + 1)),
+                    m0.get((i, j + 2)),
+                    m0.get((i, j + 3)),
+                );
+                let b = f32x4(v0.get(j + 0), v0.get(j + 1), v0.get(j + 2), v0.get(j + 3));
+                r = f32x4_add(r, f32x4_mul(a, b));
+            }
+            let sum = f32x4_extract_lane::<0>(r)
+                + f32x4_extract_lane::<1>(r)
+                + f32x4_extract_lane::<2>(r)
+                + f32x4_extract_lane::<3>(r);
+            v1.set(i, sum);
+        }
     }
 }
 
