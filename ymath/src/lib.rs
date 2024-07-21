@@ -1,4 +1,5 @@
 #![feature(specialization)]
+#![feature(portable_simd)]
 
 pub mod tensor;
 pub mod function {
@@ -57,6 +58,37 @@ impl<T: Float> Matmul for T {
                 r = r + m0.get((i, j)) * v0.get(j);
             }
             v1.set(i, r);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Matmul for f32 {
+    unsafe fn matmul<const D0: usize, const D1: usize>(
+        v1: &mut impl TWriter<f32, VECTOR<D1>>,
+        m0: &impl TReader<f32, MATRIX<D0, D1>>,
+        v0: &impl TReader<f32, VECTOR<D0>>,
+    ) {
+        use std::simd::*;
+
+        let m0 = m0.reader();
+        let v0 = v0.reader();
+        let mut v1 = v1.writer();
+        for i in 0..D1 {
+            let mut r: f32x4 = [0.0, 0.0, 0.0, 0.0].into();
+            for j in (0..D0).step_by(4) {
+                let a: f32x4 = [
+                    m0.get((i, j + 0)),
+                    m0.get((i, j + 1)),
+                    m0.get((i, j + 2)),
+                    m0.get((i, j + 3)),
+                ]
+                .into();
+                let b: f32x4 = [v0.get(j + 0), v0.get(j + 1), v0.get(j + 2), v0.get(j + 3)].into();
+                r = r + a * b;
+            }
+            let sum = r.as_array().iter().sum();
+            v1.set(i, sum);
         }
     }
 }
