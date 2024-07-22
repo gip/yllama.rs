@@ -1,6 +1,6 @@
 # yllama.rs
 
-The idea was to work on a non-trivial implementation to learn a bit of Rust and get back into coding after years of engineering management. Project was timeboxed to a few days. Inspired by [llama.cpp](https://github.com/ggerganov/llama.cpp), I set the goal to deliver a Llama 3 8b inference implementation that could run on a modern laptop and could also be deployed to the Internet Computer (ICP). Was fun.
+The idea was to work on a non-trivial implementation to learn a bit of Rust and get back into coding after years of engineering management. Project was timeboxed to a few days. Inspired by [llama.cpp](https://github.com/ggerganov/llama.cpp), the goal was to deliver a Llama 3 8b inference implementation that could run on a modern laptop and could also be deployed to the Internet Computer (ICP).
 
 ## Goals
 
