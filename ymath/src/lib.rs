@@ -1,4 +1,5 @@
 #![feature(specialization)]
+#![feature(portable_simd)]
 
 pub mod tensor;
 pub mod function {
@@ -57,6 +58,62 @@ impl<T: Float> Matmul for T {
                 r = r + m0.get((i, j)) * v0.get(j);
             }
             v1.set(i, r);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Matmul for f32 {
+    unsafe fn matmul<const D0: usize, const D1: usize>(
+        v1: &mut impl TWriter<f32, VECTOR<D1>>,
+        m0: &impl TReader<f32, MATRIX<D0, D1>>,
+        v0: &impl TReader<f32, VECTOR<D0>>,
+    ) {
+        use std::simd::num::SimdFloat;
+        use std::simd::*;
+
+        const SIMD_WIDTH: usize = 8; // Up to 8 lanes
+        type SimdVec = Simd<f32, SIMD_WIDTH>;
+
+        let m0 = m0.reader();
+        let v0 = v0.reader();
+        let mut v1 = v1.writer();
+
+        for i in 0..D1 {
+            let mut r: SimdVec = Simd::splat(0.0);
+            let mut j = 0;
+
+            while j + SIMD_WIDTH <= D0 {
+                let a: SimdVec = Simd::from_slice(&[
+                    m0.get((i, j)),
+                    m0.get((i, j + 1)),
+                    m0.get((i, j + 2)),
+                    m0.get((i, j + 3)),
+                    m0.get((i, j + 4)),
+                    m0.get((i, j + 5)),
+                    m0.get((i, j + 6)),
+                    m0.get((i, j + 7)),
+                ]);
+                let b: SimdVec = Simd::from_slice(&[
+                    v0.get(j),
+                    v0.get(j + 1),
+                    v0.get(j + 2),
+                    v0.get(j + 3),
+                    v0.get(j + 4),
+                    v0.get(j + 5),
+                    v0.get(j + 6),
+                    v0.get(j + 7),
+                ]);
+                r += a * b;
+                j += SIMD_WIDTH;
+            }
+
+            let mut sum = r.reduce_sum();
+            while j < D0 {
+                sum += m0.get((i, j)) * v0.get(j);
+                j += 1;
+            }
+            v1.set(i, sum);
         }
     }
 }
