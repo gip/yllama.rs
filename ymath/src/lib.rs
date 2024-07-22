@@ -69,25 +69,50 @@ impl Matmul for f32 {
         m0: &impl TReader<f32, MATRIX<D0, D1>>,
         v0: &impl TReader<f32, VECTOR<D0>>,
     ) {
+        use std::simd::num::SimdFloat;
         use std::simd::*;
+
+        const SIMD_WIDTH: usize = 8; // Up to 8 lanes
+        type SimdVec = Simd<f32, SIMD_WIDTH>;
 
         let m0 = m0.reader();
         let v0 = v0.reader();
         let mut v1 = v1.writer();
+
         for i in 0..D1 {
-            let mut r: f32x4 = [0.0, 0.0, 0.0, 0.0].into();
-            for j in (0..D0).step_by(4) {
-                let a: f32x4 = [
-                    m0.get((i, j + 0)),
+            let mut r: SimdVec = Simd::splat(0.0);
+            let mut j = 0;
+
+            while j + SIMD_WIDTH <= D0 {
+                let a: SimdVec = Simd::from_slice(&[
+                    m0.get((i, j)),
                     m0.get((i, j + 1)),
                     m0.get((i, j + 2)),
                     m0.get((i, j + 3)),
-                ]
-                .into();
-                let b: f32x4 = [v0.get(j + 0), v0.get(j + 1), v0.get(j + 2), v0.get(j + 3)].into();
-                r = r + a * b;
+                    m0.get((i, j + 4)),
+                    m0.get((i, j + 5)),
+                    m0.get((i, j + 6)),
+                    m0.get((i, j + 7)),
+                ]);
+                let b: SimdVec = Simd::from_slice(&[
+                    v0.get(j),
+                    v0.get(j + 1),
+                    v0.get(j + 2),
+                    v0.get(j + 3),
+                    v0.get(j + 4),
+                    v0.get(j + 5),
+                    v0.get(j + 6),
+                    v0.get(j + 7),
+                ]);
+                r += a * b;
+                j += SIMD_WIDTH;
             }
-            let sum = r.as_array().iter().sum();
+
+            let mut sum = r.reduce_sum();
+            while j < D0 {
+                sum += m0.get((i, j)) * v0.get(j);
+                j += 1;
+            }
             v1.set(i, sum);
         }
     }
