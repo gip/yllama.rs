@@ -787,7 +787,8 @@ where
         let params: LlamaParams<T> = Instantiable::instantiate(model)?;
 
         if params.vocab_size != VOCAB {
-            return Err(anyhow!("'llama.vocab_size' doesn't match the static value"));
+            let msg = format!("'llama.vocab_size' doesn't match the static value: {} != {}", params.vocab_size, VOCAB);
+            return Err(anyhow!(msg));
         }
 
         let token_embd = Instantiable::instantiate((model, "token_embd.weight".to_string()))?;
@@ -999,7 +1000,7 @@ where
 pub fn llama_find_type(model: &ModelFile) -> Result<&str, anyhow::Error> {
     let find = |name| match model.tensors.get(name) {
         Some(t) => Ok(t.tensor_type),
-        None => Err(anyhow!("could not find tensor")),
+        None => Err(anyhow!(format!("could not find tensor {}", name))),
     };
 
     let token_embd = find("token_embd.weight")?;

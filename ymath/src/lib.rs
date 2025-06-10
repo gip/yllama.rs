@@ -1,4 +1,4 @@
-#![feature(specialization)]
+#![feature(min_specialization)]
 #![feature(portable_simd)]
 
 pub mod tensor;

@@ -278,8 +278,8 @@ fn main() {
 
     match result {
         Err(e) => {
-            println!("tinyllama: error: {}", e)
+            println!("yllama: error: {}", e)
         }
-        _ => println!("tinyllama: done"),
+        _ => println!("yllama: done"),
     }
 }
