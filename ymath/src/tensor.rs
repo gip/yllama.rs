@@ -38,19 +38,19 @@ impl<const D0: usize, const D1: usize> IsMatrix for MATRIX<D0, D1> {}
 
 // Tensor traits //////////////////////////////////////////////////////////////
 pub trait TensorTypes<T, SHAPE> {
+    /// The underlying storage type that holds the tensor data
+    /// This is the actual data container that stores the tensor elements
     type StoreType<'a>
     where
         T: 'a;
+    /// The type used for reading from the tensor
+    /// This is typically a reference to the underlying data
     type ReaderType<'a>
     where
         T: 'a;
+    /// The type used for writing to the tensor
+    /// This is typically a mutable reference to the underlying data
     type WriterType<'a>
-    where
-        T: 'a;
-    type ReaderTypeA<'a>
-    where
-        T: 'a;
-    type WriterTypeA<'a>
     where
         T: 'a;
 }
@@ -325,7 +325,7 @@ where
     T: 'a,
 {
     type RowStoreType = SubStore<T>;
-    type RowTensorType<'b> = Tensor<'b, true, T, VECTOR<D0>, SubStore<T, true>> where Self: 'b;
+    type RowTensorType<'b> = Tensor<'b, true, T, V<D0>, SubStore<T, true>> where Self: 'b;
 
     fn row<'b>(&'b mut self, i: usize) -> Self::RowTensorType<'b> {
         debug_assert!(i < D1);
@@ -346,8 +346,6 @@ impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for MmapStore<T, T> {
     type StoreType<'a> = (Rc<Mmap>, &'a [T]) where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = &'a mut [T] where T: 'a;
-    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
-    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
 }
 
 impl<'a, T, SHAPE: IsTensor + Indexable> TReader<T, SHAPE>
@@ -370,8 +368,6 @@ impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for MmapStore<f32, f16, true> {
     type StoreType<'a> = (Rc<Mmap>, &'a [f16]);
     type ReaderType<'a> = Vec<f32>;
     type WriterType<'a> = &'a mut [f16];
-    type ReaderTypeA<'a> = TVec<f32, SHAPE>;
-    type WriterTypeA<'a> = &'a mut [f16];
 }
 
 impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE>
@@ -393,8 +389,6 @@ impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for MmapStore<f32, f16, false> {
     type StoreType<'a> = (Rc<Mmap>, &'a [f16]);
     type ReaderType<'a> = &'a [f16];
     type WriterType<'a> = &'a mut [f16];
-    type ReaderTypeA<'a> = TSlice<'a, f16, SHAPE>;
-    type WriterTypeA<'a> = TSliceMut<'a, f16, SHAPE>;
 }
 
 impl<'a, T: Copy, const D0: usize, const D1: usize> Rowable<T, D0, D1, MmapStore<T, T>>
@@ -403,7 +397,7 @@ where
     T: 'a,
 {
     type RowStoreType = SubStore<T>;
-    type RowTensorType<'b> = Tensor<'b, false, T, VECTOR<D0>, MmapStore<T, T>> where Self: 'b;
+    type RowTensorType<'b> = Tensor<'b, false, T, V<D0>, MmapStore<T, T>> where Self: 'b;
 
     fn row<'b>(&'b self, i: usize) -> Self::RowTensorType<'b> {
         debug_assert!(i < D1);
@@ -424,8 +418,6 @@ impl<'b, T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for RefStore<'b, T> {
     type StoreType<'a> = (usize, &'a RefCell<Vec<T>>) where T: 'a;
     type ReaderType<'a> =() where T: 'a;
     type WriterType<'a> = () where T: 'a;
-    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
-    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
 }
 
 pub struct TCell<'a, T, SHAPE> {
@@ -630,24 +622,18 @@ impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for SubStore<T, false> {
     type StoreType<'a> = &'a [T] where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = () where T: 'a;
-    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
-    type WriterTypeA<'a> = () where T: 'a;
 }
 
 impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for SubStore<T, true> {
     type StoreType<'a> = &'a mut [T] where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = &'a mut [T] where T: 'a;
-    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
-    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
 }
 
 impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for SubStore<f16> {
     type StoreType<'a> = &'a [f16];
     type ReaderType<'a> = &'a [f16];
     type WriterType<'a> = &'a mut [f16];
-    type ReaderTypeA<'a> = TSlice<'a, f16, SHAPE>;
-    type WriterTypeA<'a> = TSliceMut<'a, f16, SHAPE>;
 }
 
 impl<'a, T, SHAPE: IsTensor + Indexable> TReader<T, SHAPE>
@@ -750,8 +736,6 @@ impl<T, SHAPE: IsTensor> TensorTypes<T, SHAPE> for VecStore<T> {
     type StoreType<'a> = Vec<T> where T: 'a;
     type ReaderType<'a> = &'a [T] where T: 'a;
     type WriterType<'a> = &'a mut [T] where T: 'a;
-    type ReaderTypeA<'a> = TSlice<'a, T, SHAPE> where T: 'a;
-    type WriterTypeA<'a> = TSliceMut<'a, T, SHAPE> where T: 'a;
 }
 
 impl<'a, T, SHAPE: IsTensor + Indexable> TReader<T, SHAPE>
@@ -773,8 +757,6 @@ impl<SHAPE: IsTensor> TensorTypes<f32, SHAPE> for VecStore<f16> {
     type StoreType<'a> = Vec<f16>;
     type ReaderType<'a> = &'a [f16];
     type WriterType<'a> = ();
-    type ReaderTypeA<'a> = TSlice<'a, f16, SHAPE>;
-    type WriterTypeA<'a> = ();
 }
 
 impl<'a, SHAPE: IsTensor + Indexable> TReader<f32, SHAPE>

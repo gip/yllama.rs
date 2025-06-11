@@ -44,7 +44,7 @@ impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
     {
         let t = model.tensors.get(&name).expect("Tensor not found");
         Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+            .map_err(|_| anyhow!("GGUF tensor import error {}", name))?)
     }
 }
 
@@ -57,7 +57,7 @@ impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFi
     {
         let t = model.tensors.get(&name).expect("Tensor not found");
         Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+            .map_err(|_| anyhow!("GGUF tensor import error {}", name))?)
     }
 }
 
@@ -70,7 +70,7 @@ impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFi
     {
         let t = model.tensors.get(&name).expect("Tensor not found");
         Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+            .map_err(|_| anyhow!("GGUF tensor import error {}", name))?)
     }
 }
 
@@ -83,7 +83,7 @@ impl<'a, const D0: usize, const D1: usize> Instantiable<VIRTUALMEM, (&'a ModelFi
     {
         let t = model.tensors.get(&name).expect("Tensor not found");
         Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+            .map_err(|_| anyhow!("GGUF tensor import error {}", name))?)
     }
 }
 
@@ -96,7 +96,7 @@ impl<'a, const D0: usize> Instantiable<VIRTUALMEM, (&'a ModelFile, String)>
     {
         let t = model.tensors.get(&name).expect("Tensor not found");
         Ok(t.to_tensor(model)
-            .map_err(|_| anyhow!("GGUF tensor import error"))?)
+            .map_err(|_| anyhow!("GGUF tensor import error {}", name))?)
     }
 }
 
@@ -173,7 +173,7 @@ fn process(
             type D = VecStore<f16>;
             let typ = yllama::llama::llama_find_type(&model)?;
             const EMBED: usize = 4096;
-            const VOCAB: usize = 128256;
+            const VOCAB: usize = 32768; // 128256;
             const FF: usize = 14336;
             const KV: usize = 1024;
             const CONTEXT: usize = 2048;

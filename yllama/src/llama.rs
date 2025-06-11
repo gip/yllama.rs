@@ -1004,8 +1004,9 @@ pub fn llama_find_type(model: &ModelFile) -> Result<&str, anyhow::Error> {
     };
 
     let token_embd = find("token_embd.weight")?;
+    println!("token_embd: {:?}", token_embd);
     let output = find("output.weight")?;
-    println!("{:?}", output);
+    println!("output: {:?}", output);
     if token_embd == GGMLType::F32 {
         Ok("F32")
     } else {
